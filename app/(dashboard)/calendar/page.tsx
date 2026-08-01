@@ -12,6 +12,13 @@ import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { asArray, getInitials } from "@/lib/utils";
 import { toast } from "sonner";
@@ -221,7 +228,6 @@ export default function CalendarPage() {
   const [anchorDate, setAnchorDate] = useState(() => new Date());
   const [selectedDate, setSelectedDate] = useState<Date | null>(null);
   const [showSync, setShowSync] = useState(true);
-  const [showFilters, setShowFilters] = useState(false);
   const [showEmployeeSearch, setShowEmployeeSearch] = useState(false);
   const [employeeSearch, setEmployeeSearch] = useState("");
   const [selectedEmployees, setSelectedEmployees] = useState<Set<string>>(new Set());
@@ -422,6 +428,13 @@ export default function CalendarPage() {
       (member, index) => merged.findIndex((candidate) => candidate.id === member.id) === index,
     );
   }, [selectedEmployees, teamMembers]);
+
+  const hiddenTeamMembers = useMemo(
+    () => teamMembers.filter(
+      (member) => !visibleTeamMembers.some((visible) => visible.id === member.id)
+    ),
+    [teamMembers, visibleTeamMembers]
+  );
 
   const employeeSearchResults = useMemo(() => {
     const term = employeeSearch.trim().toLowerCase();
@@ -1124,20 +1137,89 @@ export default function CalendarPage() {
           </Button>
 
           <div className="ml-auto flex items-center gap-2">
-            <Button
-              variant={showFilters || activeFilterCount > 0 ? "secondary" : "ghost"}
-              size="sm"
-              className="h-8 text-xs"
-              onClick={() => setShowFilters((value) => !value)}
-            >
-              <Filter className="mr-1 h-3.5 w-3.5" />
-              Filters
-              {activeFilterCount > 0 ? (
-                <span className="ml-1 flex h-4 w-4 items-center justify-center rounded-full bg-blue-600 text-[9px] text-white">
-                  {activeFilterCount}
-                </span>
-              ) : null}
-            </Button>
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button
+                  variant={activeFilterCount > 0 ? "secondary" : "ghost"}
+                  size="sm"
+                  className="h-8 text-xs"
+                >
+                  <Filter className="mr-1 h-3.5 w-3.5" />
+                  Filters
+                  {activeFilterCount > 0 ? (
+                    <span className="ml-1 flex h-4 w-4 items-center justify-center rounded-full bg-blue-600 text-[9px] text-white">
+                      {activeFilterCount}
+                    </span>
+                  ) : null}
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="w-[360px] max-w-[calc(100vw-2rem)] p-3">
+                <div className="space-y-3">
+                  <div>
+                    <p className="mb-2 text-[11px] font-medium uppercase tracking-wide text-gray-500">
+                      Status
+                    </p>
+                    <div className="flex flex-wrap gap-1.5">
+                      {STATUS_FILTER_OPTIONS.map((option) => {
+                        const isActive = selectedStatuses.has(option.value);
+                        return (
+                          <button
+                            key={option.value}
+                            type="button"
+                            onClick={() => toggleStatus(option.value)}
+                            className={`rounded-full border px-2.5 py-1 text-[11px] transition-colors ${
+                              isActive
+                                ? "border-blue-500 bg-blue-600/15 text-blue-300"
+                                : "border-[#1e2d40] text-gray-400 hover:text-gray-200"
+                            }`}
+                          >
+                            {option.label}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                  {serviceOptions.length > 0 ? (
+                    <div>
+                      <p className="mb-2 text-[11px] font-medium uppercase tracking-wide text-gray-500">
+                        Service
+                      </p>
+                      <div className="flex flex-wrap gap-1.5">
+                        {serviceOptions.map((name) => {
+                          const isActive = selectedServices.has(name);
+                          return (
+                            <button
+                              key={name}
+                              type="button"
+                              onClick={() => toggleService(name)}
+                              className={`rounded-full border px-2.5 py-1 text-[11px] transition-colors ${
+                                isActive
+                                  ? "border-blue-500 bg-blue-600/15 text-blue-300"
+                                  : "border-[#1e2d40] text-gray-400 hover:text-gray-200"
+                              }`}
+                            >
+                              {name}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  ) : null}
+
+                  {activeFilterCount > 0 ? (
+                    <button
+                      type="button"
+                      onClick={clearFilters}
+                      className="flex items-center gap-1 text-[11px] text-gray-500 hover:text-gray-300"
+                    >
+                      <X className="h-3 w-3" />
+                      Clear filters
+                    </button>
+                  ) : null}
+                </div>
+              </DropdownMenuContent>
+            </DropdownMenu>
             <Button
               variant="ghost"
               size="icon"
@@ -1149,63 +1231,6 @@ export default function CalendarPage() {
             </Button>
           </div>
         </div>
-
-        {/* Filters panel */}
-        {showFilters ? (
-          <div className="flex shrink-0 flex-wrap items-center gap-4 rounded-2xl border border-[#1e2d40] bg-[#0d1a2d] p-3">
-            <div className="flex flex-wrap items-center gap-1.5">
-              <span className="mr-1 text-[11px] text-gray-500">Status</span>
-              {STATUS_FILTER_OPTIONS.map((option) => {
-                const isActive = selectedStatuses.has(option.value);
-                return (
-                  <button
-                    key={option.value}
-                    onClick={() => toggleStatus(option.value)}
-                    className={`rounded-full border px-2.5 py-1 text-[11px] transition-colors ${
-                      isActive
-                        ? "border-blue-500 bg-blue-600/15 text-blue-300"
-                        : "border-[#1e2d40] text-gray-400 hover:text-gray-200"
-                    }`}
-                  >
-                    {option.label}
-                  </button>
-                );
-              })}
-            </div>
-
-            {serviceOptions.length > 0 ? (
-              <div className="flex flex-wrap items-center gap-1.5">
-                <span className="mr-1 text-[11px] text-gray-500">Service</span>
-                {serviceOptions.map((name) => {
-                  const isActive = selectedServices.has(name);
-                  return (
-                    <button
-                      key={name}
-                      onClick={() => toggleService(name)}
-                      className={`rounded-full border px-2.5 py-1 text-[11px] transition-colors ${
-                        isActive
-                          ? "border-blue-500 bg-blue-600/15 text-blue-300"
-                          : "border-[#1e2d40] text-gray-400 hover:text-gray-200"
-                      }`}
-                    >
-                      {name}
-                    </button>
-                  );
-                })}
-              </div>
-            ) : null}
-
-            {activeFilterCount > 0 ? (
-              <button
-                onClick={clearFilters}
-                className="ml-auto flex items-center gap-1 text-[11px] text-gray-500 hover:text-gray-300"
-              >
-                <X className="h-3 w-3" />
-                Clear filters
-              </button>
-            ) : null}
-          </div>
-        ) : null}
 
         {/* Main grid */}
         <div className="grid min-h-0 flex-1 grid-cols-1 gap-3 overflow-hidden xl:grid-cols-4 2xl:gap-4">
@@ -1271,6 +1296,60 @@ export default function CalendarPage() {
                       </button>
                     );
                   })}
+                  {hiddenTeamMembers.length > 0 ? (
+                    <DropdownMenu>
+                      <DropdownMenuTrigger asChild>
+                        <button
+                          type="button"
+                          className="flex h-7 items-center gap-1.5 rounded-full border border-[#1e2d40] bg-[#071321] px-3 text-xs font-medium text-gray-300 transition-colors hover:bg-[#1e2d40] hover:text-white"
+                        >
+                          More
+                          <span className="rounded-full bg-[#1e2d40] px-1.5 py-0.5 text-[10px] text-gray-400">
+                            +{hiddenTeamMembers.length}
+                          </span>
+                        </button>
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent align="start" className="w-64">
+                        <DropdownMenuLabel>More employees</DropdownMenuLabel>
+                        <div className="max-h-64 overflow-y-auto pr-1 scrollbar-blue">
+                          {hiddenTeamMembers.map((member) => {
+                            const isSelected = selectedEmployees.has(member.id);
+                            return (
+                              <DropdownMenuItem
+                                key={member.id}
+                                onClick={() => toggleMember(member.id)}
+                                className={isSelected ? "bg-blue-600/20" : ""}
+                              >
+                                <Avatar className="h-6 w-6">
+                                  {member.imageUrl ? (
+                                    <AvatarImage src={member.imageUrl} alt={member.name} />
+                                  ) : (
+                                    <AvatarFallback
+                                      className="text-[9px]"
+                                      style={{
+                                        backgroundColor: `${member.color}33`,
+                                        color: member.color,
+                                      }}
+                                    >
+                                      {getInitials(member.name)}
+                                    </AvatarFallback>
+                                  )}
+                                </Avatar>
+                                <span className="min-w-0 flex-1 truncate text-xs font-medium">
+                                  {member.name}
+                                </span>
+                                {isSelected ? (
+                                  <span className="rounded-full bg-blue-600/25 px-2 py-0.5 text-[10px] text-blue-200">
+                                    Selected
+                                  </span>
+                                ) : null}
+                              </DropdownMenuItem>
+                            );
+                          })}
+                        </div>
+                      </DropdownMenuContent>
+                    </DropdownMenu>
+                  ) : null}
                   <div ref={employeeSearchRef} className="relative">
                     <button
                       type="button"

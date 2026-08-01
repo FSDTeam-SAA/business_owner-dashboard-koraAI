@@ -12,6 +12,13 @@ import { Header } from "@/components/layout/header";
 import { Card, CardContent } from "@/components/ui/card";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Skeleton } from "@/components/ui/skeleton";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { getInitials, asArray } from "@/lib/utils";
 import Link from "next/link";
 import {
@@ -29,7 +36,6 @@ import {
   Calendar,
   CalendarPlus,
   CalendarX,
-  ChevronDown,
   Globe,
   MessageCircle,
   MessageSquare,
@@ -56,6 +62,39 @@ const isSameLocalDay = (value: string | Date | undefined, ref: Date) => {
     d.getMonth() === ref.getMonth() &&
     d.getDate() === ref.getDate()
   );
+};
+
+const startOfDay = (date: Date) => {
+  const next = new Date(date);
+  next.setHours(0, 0, 0, 0);
+  return next;
+};
+
+const endOfDay = (date: Date) => {
+  const next = new Date(date);
+  next.setHours(23, 59, 59, 999);
+  return next;
+};
+
+const startOfWeek = (date: Date) => {
+  const next = startOfDay(date);
+  const day = next.getDay();
+  const diff = day === 0 ? -6 : 1 - day;
+  next.setDate(next.getDate() + diff);
+  return next;
+};
+
+const endOfWeek = (date: Date) => endOfDay(addDays(startOfWeek(date), 6));
+
+const startOfMonth = (date: Date) => startOfDay(new Date(date.getFullYear(), date.getMonth(), 1));
+
+const endOfMonth = (date: Date) =>
+  endOfDay(new Date(date.getFullYear(), date.getMonth() + 1, 0));
+
+const addDays = (date: Date, amount: number) => {
+  const next = new Date(date);
+  next.setDate(next.getDate() + amount);
+  return next;
 };
 
 const timeToMin = (time?: string) => {
@@ -98,6 +137,21 @@ const APPT_BADGE: Record<string, { label: string; cls: string; bar: string }> = 
 const apptBadge = (status?: string) => APPT_BADGE[status || "upcoming"] || APPT_BADGE.upcoming;
 
 const guestName = (a: any) => a?.customer?.name || a?.client?.name || "Customer";
+
+const appointmentDateKey = (appointment: any) => {
+  const raw = appointment?.appointmentDate || appointment?.date || appointment?.startedAt;
+  if (!raw) return "";
+  if (typeof raw === "string" && /^\d{4}-\d{2}-\d{2}/.test(raw)) return raw.slice(0, 10);
+  return toDateKey(new Date(raw));
+};
+
+type AppointmentChartRange = "today" | "weekly" | "monthly";
+type AppointmentChartPoint = {
+  label: string;
+  count: number;
+  dateKey?: string;
+  hourStart?: number;
+};
 
 /* Activity feed item → icon + accent + status, derived from free-form type/action */
 const classifyActivity = (item: any) => {
@@ -171,6 +225,8 @@ export default function LiveViewPage() {
   const queryClient = useQueryClient();
   const [now, setNow] = useState(() => new Date());
   const [filterType, setFilterType] = useState<string>("all");
+  const [appointmentChartRange, setAppointmentChartRange] =
+    useState<AppointmentChartRange>("today");
 
   // Live clock for active-call durations (1s tick)
   useEffect(() => {
@@ -184,6 +240,16 @@ export default function LiveViewPage() {
     d.setDate(d.getDate() - 1);
     return toDateKey(d);
   }, []);
+  const appointmentChartDateRange = useMemo(() => {
+    const anchor = new Date(`${todayKey}T00:00:00`);
+    if (appointmentChartRange === "weekly") {
+      return { start: startOfWeek(anchor), end: endOfWeek(anchor) };
+    }
+    if (appointmentChartRange === "monthly") {
+      return { start: startOfMonth(anchor), end: endOfMonth(anchor) };
+    }
+    return { start: startOfDay(anchor), end: endOfDay(anchor) };
+  }, [appointmentChartRange, todayKey]);
 
   /* ── Queries (polled so the board stays live) ── */
   const POLL = 25_000;
@@ -205,6 +271,25 @@ export default function LiveViewPage() {
     queryFn: () => appointmentsApi.getAll({ date: yesterdayKey, limit: 200 }).then((r) => r.data),
   });
 
+  const { data: chartApptResp, isLoading: chartApptLoading } = useQuery({
+    queryKey: [
+      "live-view-chart-appointments",
+      appointmentChartRange,
+      appointmentChartDateRange.start.toISOString(),
+      appointmentChartDateRange.end.toISOString(),
+    ],
+    queryFn: () =>
+      appointmentsApi
+        .getAll({
+          startDate: appointmentChartDateRange.start.toISOString(),
+          endDate: appointmentChartDateRange.end.toISOString(),
+          limit: appointmentChartRange === "monthly" ? 1000 : 500,
+        })
+        .then((r) => r.data),
+    enabled: appointmentChartRange !== "today",
+    refetchInterval: appointmentChartRange === "today" ? false : POLL,
+  });
+
   const { data: convResp, isLoading: convLoading } = useQuery({
     queryKey: ["live-view-conversations"],
     queryFn: () => liveViewApi.getConversations().then((r) => r.data),
@@ -223,6 +308,7 @@ export default function LiveViewPage() {
     queryClient.invalidateQueries({ queryKey: ["live-view-conversations"] });
     queryClient.invalidateQueries({ queryKey: ["live-view-calls"] });
     queryClient.invalidateQueries({ queryKey: ["live-view-appointments", todayKey] });
+    queryClient.invalidateQueries({ queryKey: ["live-view-chart-appointments"] });
   };
   useSocketEvent("notification:new", refresh);
   useSocketEvent("inbox:new-message", refresh);
@@ -235,10 +321,28 @@ export default function LiveViewPage() {
   const activities: any[] = useMemo(() => asArray(activityResp?.data), [activityResp]);
   const appointments: any[] = useMemo(() => asArray(apptResp?.data), [apptResp]);
   const yAppointments: any[] = useMemo(() => asArray(yApptResp?.data), [yApptResp]);
+  const chartRangeAppointments: any[] = useMemo(
+    () => asArray(chartApptResp?.data),
+    [chartApptResp]
+  );
   const conversations: any[] = useMemo(() => asArray(convResp?.data), [convResp]);
   const calls: any[] = useMemo(() => asArray(callResp?.data), [callResp]);
-  const activeAppts = appointments.filter((a) => a.status !== "cancelled");
-  const inShop = activeAppts.filter((a) => ["started", "ongoing"].includes(a.status));
+  const activeAppts = useMemo(
+    () => appointments.filter((a) => a.status !== "cancelled"),
+    [appointments]
+  );
+  const yActiveAppts = useMemo(
+    () => yAppointments.filter((a) => a.status !== "cancelled"),
+    [yAppointments]
+  );
+  const activeChartRangeAppts = useMemo(
+    () => chartRangeAppointments.filter((a) => a.status !== "cancelled"),
+    [chartRangeAppointments]
+  );
+  const inShop = useMemo(
+    () => activeAppts.filter((a) => ["started", "ongoing"].includes(a.status)),
+    [activeAppts]
+  );
 
   const todayCalls = calls.filter((c) => isSameLocalDay(c.createdAt, now));
   const missedToday = todayCalls.filter((c) => c.status === "missed").length;
@@ -259,20 +363,73 @@ export default function LiveViewPage() {
     );
   }, [activities, filterType]);
 
-  const chartData = useMemo(() => {
+  const chartAppointments = useMemo(
+    () => (appointmentChartRange === "today" ? activeAppts : activeChartRangeAppts),
+    [activeAppts, activeChartRangeAppts, appointmentChartRange]
+  );
+  const chartTitle = {
+    today: "Appointments Today",
+    weekly: "Appointments This Week",
+    monthly: "Appointments This Month",
+  }[appointmentChartRange];
+  const chartDelta = pctChange(activeAppts.length, yActiveAppts.length);
+  const chartHelper = {
+    today: `${chartDelta >= 0 ? "+" : "-"} ${Math.abs(chartDelta)}% vs yesterday`,
+    weekly: "Weekly view",
+    monthly: "Monthly view",
+  }[appointmentChartRange];
+  const chartTickInterval = appointmentChartRange === "monthly" ? 3 : appointmentChartRange === "weekly" ? 0 : 1;
+
+  const chartData = useMemo<AppointmentChartPoint[]>(() => {
+    if (appointmentChartRange === "weekly") {
+      const start = appointmentChartDateRange.start;
+      const buckets = Array.from({ length: 7 }, (_, i) => {
+        const date = addDays(start, i);
+        return {
+          label: date.toLocaleDateString("en-US", { weekday: "short" }),
+          dateKey: toDateKey(date),
+          count: 0,
+        };
+      });
+      chartAppointments.forEach((a) => {
+        const key = appointmentDateKey(a);
+        const bucket = buckets.find((item) => item.dateKey === key);
+        if (bucket) bucket.count += 1;
+      });
+      return buckets;
+    }
+
+    if (appointmentChartRange === "monthly") {
+      const start = appointmentChartDateRange.start;
+      const daysInMonth = appointmentChartDateRange.end.getDate();
+      const buckets = Array.from({ length: daysInMonth }, (_, i) => {
+        const date = addDays(start, i);
+        return {
+          label: String(date.getDate()),
+          dateKey: toDateKey(date),
+          count: 0,
+        };
+      });
+      chartAppointments.forEach((a) => {
+        const key = appointmentDateKey(a);
+        const bucket = buckets.find((item) => item.dateKey === key);
+        if (bucket) bucket.count += 1;
+      });
+      return buckets;
+    }
+
     const buckets = Array.from({ length: 13 }, (_, i) => ({
       label: `${String(i * 2).padStart(2, "0")}:00`,
       hourStart: i * 2,
       count: 0,
     }));
-    activeAppts.forEach((a) => {
+    chartAppointments.forEach((a) => {
       const hour = timeToMin(a.startTime) / 60;
       const idx = Math.min(12, Math.floor(hour / 2));
       if (buckets[idx]) buckets[idx].count += 1;
     });
     return buckets;
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [apptResp]);
+  }, [appointmentChartDateRange.end, appointmentChartDateRange.start, appointmentChartRange, chartAppointments]);
 
   /* Today's appointments timeline (sorted), with a "Next" marker */
   const timeline = useMemo(() => {
@@ -389,20 +546,18 @@ export default function LiveViewPage() {
               <CardContent className="flex min-h-0 flex-1 flex-col p-4">
                 <div className="mb-3 flex shrink-0 items-center justify-between">
                   <p className="text-sm font-semibold text-white">Live Activity Feed</p>
-                  <div className="relative">
-                    <select
-                      value={filterType}
-                      onChange={(e) => setFilterType(e.target.value)}
-                      className="appearance-none rounded-lg border border-[#1e2d40] bg-[#0d1a2d] py-1 pl-3 pr-7 text-[11px] text-gray-300 focus:outline-none"
-                    >
-                      <option value="all">Filter</option>
-                      <option value="call">Calls</option>
-                      <option value="message">Messages</option>
-                      <option value="appointment">Appointments</option>
-                      <option value="ai">AI Actions</option>
-                    </select>
-                    <ChevronDown className="pointer-events-none absolute right-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-gray-500" />
-                  </div>
+                  <Select value={filterType} onValueChange={setFilterType}>
+                    <SelectTrigger className="h-8 w-[132px] border-[#1e2d40] bg-[#0d1a2d] px-3 py-1 text-[11px]">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent align="end" className="text-xs">
+                      <SelectItem value="all">All activity</SelectItem>
+                      <SelectItem value="call">Calls</SelectItem>
+                      <SelectItem value="message">Messages</SelectItem>
+                      <SelectItem value="appointment">Appointments</SelectItem>
+                      <SelectItem value="ai">AI actions</SelectItem>
+                    </SelectContent>
+                  </Select>
                 </div>
 
                 <div className="min-h-0 flex-1 space-y-1 overflow-y-auto pr-1">
@@ -461,24 +616,39 @@ export default function LiveViewPage() {
               <CardContent className="flex min-h-0 flex-1 flex-col p-4">
                 <div className="mb-1 flex shrink-0 items-start justify-between">
                   <div>
-                    <p className="text-sm font-semibold text-white">Appointments Today</p>
+                    <p className="text-sm font-semibold text-white">{chartTitle}</p>
                     <p className="mt-1 text-2xl font-extrabold leading-none text-white">
-                      {activeAppts.length}
+                      {chartAppointments.length}
                     </p>
-                    {(() => {
-                      const d = pctChange(activeAppts.length, yAppointments.filter((a) => a.status !== "cancelled").length);
-                      return (
-                        <p className={`mt-1 text-[10px] ${d >= 0 ? "text-emerald-400" : "text-red-400"}`}>
-                          {d >= 0 ? "+" : "-"} {Math.abs(d)}% vs yesterday
-                        </p>
-                      );
-                    })()}
+                    <p
+                      className={`mt-1 text-[10px] ${
+                        appointmentChartRange === "today"
+                          ? chartDelta >= 0
+                            ? "text-emerald-400"
+                            : "text-red-400"
+                          : "text-gray-500"
+                      }`}
+                    >
+                      {chartHelper}
+                    </p>
                   </div>
-                  <span className="flex items-center gap-1 rounded-lg border border-[#1e2d40] px-2.5 py-1 text-[11px] text-gray-300">
-                    Today <ChevronDown className="h-3.5 w-3.5" />
-                  </span>
+                  <Select
+                    value={appointmentChartRange}
+                    onValueChange={(value) =>
+                      setAppointmentChartRange(value as AppointmentChartRange)
+                    }
+                  >
+                    <SelectTrigger className="h-8 w-[112px] border-[#1e2d40] bg-[#0d1a2d] px-3 py-1 text-[11px]">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent align="end" className="text-xs">
+                      <SelectItem value="today">Today</SelectItem>
+                      <SelectItem value="weekly">Weekly</SelectItem>
+                      <SelectItem value="monthly">Monthly</SelectItem>
+                    </SelectContent>
+                  </Select>
                 </div>
-                {apptLoading ? (
+                {(appointmentChartRange === "today" ? apptLoading : chartApptLoading) ? (
                   <Skeleton className="min-h-0 flex-1 w-full" />
                 ) : (
                   <div className="min-h-0 flex-1">
@@ -490,7 +660,7 @@ export default function LiveViewPage() {
                             <stop offset="95%" stopColor="#3b82f6" stopOpacity={0.02} />
                           </linearGradient>
                         </defs>
-                        <XAxis dataKey="label" tick={{ fontSize: 10, fill: "#64748b" }} axisLine={false} tickLine={false} interval={1} />
+                        <XAxis dataKey="label" tick={{ fontSize: 10, fill: "#64748b" }} axisLine={false} tickLine={false} interval={chartTickInterval} />
                         <YAxis tick={{ fontSize: 10, fill: "#64748b" }} axisLine={false} tickLine={false} allowDecimals={false} />
                         <Tooltip
                           contentStyle={{

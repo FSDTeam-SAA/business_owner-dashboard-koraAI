@@ -17,6 +17,7 @@ import Link from "next/link";
 import { useMobileNav } from "@/components/layout/mobile-nav-context";
 import { NotificationBell } from "@/components/notification-bell";
 import { userApi } from "@/lib/api";
+import { useDashboardI18n } from "@/lib/dashboard-i18n";
 
 interface HeaderProps {
   title: string;
@@ -27,6 +28,7 @@ interface HeaderProps {
 export function Header({ title, subtitle, action }: HeaderProps) {
   const { data: session } = useSession();
   const { setIsOpen } = useMobileNav();
+  const { t } = useDashboardI18n();
 
   const { data: profileResponse } = useQuery({
     queryKey: ["user-profile"],
@@ -61,9 +63,9 @@ export function Header({ title, subtitle, action }: HeaderProps) {
       </button>
 
       <div className="min-w-0 flex-1">
-        <h2 className="truncate dashboard-fluid-title font-bold text-white">{title}</h2>
+        <h2 className="truncate dashboard-fluid-title font-bold text-white">{t(title)}</h2>
         {subtitle ? (
-          <p className="mt-0.5 hidden truncate text-sm text-gray-400 sm:block">{subtitle}</p>
+          <p className="mt-0.5 hidden truncate text-sm text-gray-400 sm:block">{t(subtitle)}</p>
         ) : null}
       </div>
 
@@ -76,7 +78,7 @@ export function Header({ title, subtitle, action }: HeaderProps) {
             type="search"
             name="kora-dashboard-search"
             autoComplete="off"
-            placeholder="Search anything..."
+            placeholder={t("Search anything...")}
             className="h-8 border-[#1e2d40] bg-[#0d1526] pl-9 text-xs"
           />
           <kbd className="absolute right-2 top-1/2 hidden -translate-y-1/2 items-center rounded border border-[#2a3547] px-1.5 py-0.5 text-[10px] text-gray-500 sm:inline-flex">
@@ -108,26 +110,26 @@ export function Header({ title, subtitle, action }: HeaderProps) {
           </button>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end" className="w-48">
-          <DropdownMenuLabel>My Account</DropdownMenuLabel>
+          <DropdownMenuLabel>{t("My Account")}</DropdownMenuLabel>
           <DropdownMenuSeparator />
           <DropdownMenuItem asChild>
-            <Link href="/settings">Profile</Link>
+            <Link href="/settings">{t("Profile")}</Link>
           </DropdownMenuItem>
           <DropdownMenuItem asChild>
-            <Link href="/subscription">Subscription</Link>
+            <Link href="/subscription">{t("Subscription")}</Link>
           </DropdownMenuItem>
           <DropdownMenuItem asChild>
-            <Link href="/settings?tab=billing">Billing</Link>
+            <Link href="/settings?tab=billing">{t("Billing")}</Link>
           </DropdownMenuItem>
           <DropdownMenuItem asChild>
-            <Link href="/help-center">Help Center</Link>
+            <Link href="/help-center">{t("Help Center")}</Link>
           </DropdownMenuItem>
           <DropdownMenuSeparator />
           <DropdownMenuItem
             className="text-red-400"
             onClick={() => signOut({ callbackUrl: "/login" })}
           >
-            Logout
+            {t("Logout")}
           </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>

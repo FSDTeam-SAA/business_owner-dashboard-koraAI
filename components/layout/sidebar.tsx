@@ -1,7 +1,6 @@
 ﻿"use client";
 
 import Link from "next/link";
-import Image from "next/image";
 import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
@@ -29,6 +28,7 @@ import {
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { useMobileNav } from "@/components/layout/mobile-nav-context";
 import { inboxApi, requestsApi, userApi } from "@/lib/api";
+import { useDashboardI18n } from "@/lib/dashboard-i18n";
 import { useSocketEvent } from "@/lib/socket";
 import { cn, getInitials } from "@/lib/utils";
 
@@ -75,6 +75,7 @@ export function Sidebar() {
   const pathname = usePathname();
   const { data: session } = useSession();
   const { isOpen, setIsOpen } = useMobileNav();
+  const { t } = useDashboardI18n();
   const [collapsed, setCollapsed] = useState(false);
 
   const { data: profileResponse } = useQuery({
@@ -161,25 +162,10 @@ export function Sidebar() {
             collapsed && "h-20 justify-center px-0 py-4",
           )}
         >
-          <div
-            className={cn(
-              "relative flex h-[clamp(2rem,4dvh,2.5rem)] w-[clamp(2rem,4dvh,2.5rem)] shrink-0 items-center justify-center overflow-hidden rounded-xl bg-[#071321] shadow-[0_0_18px_rgba(0,183,255,0.35)] ring-1 ring-cyan-400/25",
-              collapsed && "h-11 w-11 rounded-2xl",
-            )}
-          >
-            <Image
-              src="/kora-logo.png"
-              alt="KoraAI"
-              width={40}
-              height={40}
-              className="h-full w-full object-cover"
-              priority
-            />
-          </div>
           {!collapsed && (
             <div>
               <span className="text-[clamp(1.1rem,2.6dvh,1.75rem)] font-semibold leading-none text-white">KoraAI</span>
-              <p className="mt-1 text-[14px] text-[#a8b5c6]">Business Owner Dashboard</p>
+              <p className="mt-1 text-[14px] text-[#a8b5c6]">{t("Business Owner Dashboard")}</p>
             </div>
           )}
           <button
@@ -229,7 +215,7 @@ export function Sidebar() {
                     : "text-[#c4ccda] hover:bg-[#0b1e36] hover:text-gray-100",
                   collapsed && "justify-center px-2",
                 )}
-                title={collapsed ? item.label : undefined}
+                title={collapsed ? t(item.label) : undefined}
               >
                 <div className="relative shrink-0">
                   <Icon
@@ -243,7 +229,7 @@ export function Sidebar() {
                   ) : null}
                 </div>
                 {!collapsed && (
-                  <span className="flex-1 truncate text-[clamp(0.82rem,1.55dvh,1rem)]">{item.label}</span>
+                  <span className="flex-1 truncate text-[clamp(0.82rem,1.55dvh,1rem)]">{t(item.label)}</span>
                 )}
 
                 {/* Custom/Static Badges or Dynamic Count Badges */}
@@ -254,7 +240,7 @@ export function Sidebar() {
                       item.badgeColor,
                     )}
                   >
-                    {item.staticBadge}
+                    {t(item.staticBadge)}
                   </span>
                 ) : !collapsed && dynamicBadge ? (
                   <span className="rounded-full bg-blue-600/30 px-1.5 py-0.5 text-[10px] font-semibold text-blue-400">
@@ -309,7 +295,7 @@ export function Sidebar() {
                   className="-mx-3 mt-[clamp(0.75rem,2.2dvh,1.25rem)] flex h-[clamp(2.25rem,5dvh,3rem)] items-center justify-center gap-3 rounded-lg border border-[#126dff] bg-[#07337a] px-4 text-[clamp(0.82rem,1.55dvh,1rem)] font-semibold text-[#d9ecff] shadow-[inset_0_0_24px_rgba(17,104,255,0.22)] transition-colors hover:bg-[#0b438d] active:scale-[0.99]"
                 >
                   <Crown className="h-5 w-5 text-cyan-300" strokeWidth={2} />
-                  Upgrade Plan
+                  {t("Upgrade Plan")}
                 </Link>
               </div>
 
@@ -321,7 +307,7 @@ export function Sidebar() {
                   className="h-5 w-5 shrink-0 text-gray-200"
                   strokeWidth={2}
                 />
-                Logout
+                {t("Logout")}
               </button>
             </div>
           )}

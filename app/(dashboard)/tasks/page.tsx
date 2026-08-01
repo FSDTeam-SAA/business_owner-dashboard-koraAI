@@ -28,6 +28,13 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { asArray, getInitials } from "@/lib/utils";
 import { toast } from "sonner";
@@ -35,20 +42,16 @@ import { useViewportPageSize } from "@/hooks/use-viewport-page-size";
 import {
   AlertTriangle,
   ArrowRight,
-  Ban,
   CalendarDays,
   CalendarRange,
   ChevronLeft,
   ChevronRight,
   Clock3,
-  Coffee,
   Filter,
-  Move,
   MoreVertical,
   Plus,
   Scissors,
   Star,
-  UserPlus,
   UserX,
   Users,
   CalendarPlus2,
@@ -580,7 +583,7 @@ export default function TasksPage() {
     const out: { icon: any; iconBg: string; iconColor: string; title: string; sub: string }[] = [];
 
     const busiest = [...daySummaries].sort((a, b) => b.summary.ratio - a.summary.ratio)[0];
-    if (busiest && busiest.summary.count > 0) {
+    if (busiest) {
       out.push({
         icon: Star,
         iconBg: "bg-blue-600/20",
@@ -637,20 +640,7 @@ export default function TasksPage() {
       });
     }
 
-    const calmest = [...daySummaries]
-      .filter((d) => d.summary.capacity > 0)
-      .sort((a, b) => a.summary.ratio - b.summary.ratio)[0];
-    if (calmest) {
-      out.push({
-        icon: Coffee,
-        iconBg: "bg-amber-600/20",
-        iconColor: "text-amber-400",
-        title: "Consider a promo or break",
-        sub: `${calmest.day.toLocaleDateString("en-US", { weekday: "long" })} is your quietest day.`,
-      });
-    }
-
-    return out.slice(0, 4);
+    return out.slice(0, 3);
   }, [weekDays, appointmentsByDay, employees]);
 
   /* ── Selected day (right panel) ── */
@@ -968,7 +958,7 @@ export default function TasksPage() {
               <div className="min-w-0 flex-1">
                 <p className="mb-2 text-sm font-semibold leading-none text-white">Kora Insights</p>
                 <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 xl:grid-cols-3">
-                  {(insights.length ? insights : []).map((insight, i) => (
+                  {insights.map((insight, i) => (
                     <div
                       key={i}
                       className="flex min-h-11 items-center gap-3 rounded-lg border border-[#1e2d40] bg-[#0d1a2d]/85 px-3 py-2 shadow-[inset_0_1px_0_rgba(255,255,255,0.03)]"
@@ -1000,6 +990,7 @@ export default function TasksPage() {
             </div>
           </CardContent>
         </Card>
+
         {/* ── Main grid ── */}
         <div className="grid min-h-0 flex-1 grid-cols-1 gap-3 overflow-hidden lg:grid-cols-[minmax(0,2fr)_minmax(320px,1fr)]">
           {/* Left: toolbar + capacity planner */}
@@ -1037,24 +1028,32 @@ export default function TasksPage() {
                 </div>
 
                 <div className="flex items-center gap-2">
-                  <div className="flex gap-0.5 rounded-lg bg-[#0d1a2d] p-0.5">
-                    {(["Week", "List", "Month"] as const).map((v) => (
-                      <button
-                        key={v}
-                        onClick={() => { setEmployeePage(1); setView(v); }}
-                        className={`rounded-md px-3 py-1 text-[11px] font-medium transition-colors ${
-                          view === v
-                            ? "bg-blue-600 text-white"
-                            : "text-gray-400 hover:text-gray-200"
-                        }`}
-                      >
-                        {v}
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <button className="flex items-center gap-1.5 rounded-lg border border-[#1e2d40] px-3 py-1.5 text-[11px] text-gray-300 transition-colors hover:bg-[#1e2d40]">
+                        <Filter className="h-3.5 w-3.5" /> Filters
                       </button>
-                    ))}
-                  </div>
-                  <button className="flex items-center gap-1.5 rounded-lg border border-[#1e2d40] px-3 py-1.5 text-[11px] text-gray-300 transition-colors hover:bg-[#1e2d40]">
-                    <Filter className="h-3.5 w-3.5" /> Filters
-                  </button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="end" className="w-36">
+                      <DropdownMenuLabel>View</DropdownMenuLabel>
+                      {(["Week", "List", "Month"] as const).map((option) => (
+                        <DropdownMenuItem
+                          key={option}
+                          onClick={() => {
+                            setEmployeePage(1);
+                            setView(option);
+                          }}
+                          className={
+                            view === option
+                              ? "bg-blue-600/20 text-blue-300 focus:bg-blue-600/25"
+                              : ""
+                          }
+                        >
+                          {option}
+                        </DropdownMenuItem>
+                      ))}
+                    </DropdownMenuContent>
+                  </DropdownMenu>
                 </div>
               </div>
 
@@ -1576,22 +1575,6 @@ export default function TasksPage() {
                 >
                   <Plus className="h-4 w-4" /> Add Appointment
                 </button>
-
-                <div className="mt-3 grid grid-cols-3 gap-2">
-                  {[
-                    { label: "Block Time", icon: Ban },
-                    { label: "Move Appointment", icon: Move },
-                    { label: "Assign Employee", icon: UserPlus },
-                  ].map((a) => (
-                    <button
-                      key={a.label}
-                      onClick={() => toast.info(`${a.label} coming soon`)}
-                      className="flex items-center justify-center gap-1.5 rounded-lg border border-[#1e2d40] py-2 text-xs text-gray-300 transition-colors hover:bg-[#0d1a2d]"
-                    >
-                      <a.icon className="h-3.5 w-3.5" /> {a.label}
-                    </button>
-                  ))}
-                </div>
 
                 {/* Footer summary */}
                 <div className="mt-4 grid grid-cols-3 gap-3 border-t border-[#1e2d40] pt-4">

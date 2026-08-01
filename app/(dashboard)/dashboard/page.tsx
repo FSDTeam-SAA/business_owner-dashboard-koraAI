@@ -538,16 +538,6 @@ export default function BusinessOwnerDashboard() {
             <CardHeader className="relative z-10 pb-2">
               <div className="flex min-w-0 items-center justify-between gap-3">
                 <div className="flex min-w-0 items-center gap-3">
-                  <div className="relative flex h-9 w-9 shrink-0 items-center justify-center overflow-hidden rounded-xl bg-[#071321] shadow-[0_0_18px_rgba(0,183,255,0.35)] ring-1 ring-cyan-400/25">
-                    <Image
-                      src="/kora-logo.png"
-                      alt="KoraAI"
-                      width={36}
-                      height={36}
-                      className="h-full w-full object-cover"
-                      priority
-                    />
-                  </div>
                   <CardTitle className="truncate text-lg font-semibold text-white">
                     Kora Assistant
                   </CardTitle>

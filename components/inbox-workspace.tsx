@@ -6,7 +6,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useSession } from "next-auth/react";
 import { useRouter } from "next/navigation";
-import { inboxApi, mailApi } from "@/lib/api";
+import { emailProviderApi, employeesApi, inboxApi, mailApi } from "@/lib/api";
 import { useInboxSocket } from "@/lib/socket";
 import { Header } from "@/components/layout/header";
 import { Button } from "@/components/ui/button";
@@ -145,6 +145,22 @@ const formatLastTime = (value?: string | Date | null) => {
     return formatTime(date);
   }
   return formatDate(date);
+};
+
+const parseEmailIdentity = (value?: string) => {
+  const raw = String(value || "").trim();
+  const match = raw.match(/^(.*?)\s*<([^>]+)>$/);
+  if (!match) {
+    return {
+      name: raw.includes("@") ? "" : raw,
+      email: raw.includes("@") ? raw : "",
+    };
+  }
+
+  return {
+    name: match[1].replace(/^"|"$/g, "").trim(),
+    email: match[2].trim(),
+  };
 };
 
 const getFileLabel = (message: any) => {
@@ -301,10 +317,6 @@ export function InboxWorkspace({
     }
   }, [activeTab, filteredConversations, selectedId]);
 
-  const selectedConversation = conversations.find(
-    (conversation) => String(conversation._id) === selectedId
-  );
-
   const { data: threadResponse, isLoading: threadLoading } = useQuery({
     queryKey: ["inbox-conversation", selectedId],
     enabled: activeTab === "chat" && Boolean(selectedId) && !String(selectedId).startsWith("pending-"),
@@ -313,6 +325,25 @@ export function InboxWorkspace({
   });
 
   const thread = threadResponse?.data;
+  const selectedConversation = useMemo(() => {
+    const exact = conversations.find(
+      (conversation) => String(conversation._id) === selectedId
+    );
+    if (exact) return exact;
+
+    if (selectedId && String(selectedId).startsWith("pending-")) {
+      const peerId = String(selectedId).replace(/^pending-/, "");
+      const existing = conversations.find((conversation) => {
+        if (conversation.isGroup) return false;
+        return (conversation.participants || []).some(
+          (participant: any) => String(participant._id) === peerId
+        );
+      });
+      if (existing) return existing;
+    }
+
+    return thread && String(thread._id) === String(selectedId) ? thread : null;
+  }, [conversations, selectedId, thread]);
   const messages: any[] = asArray(thread?.messages || (selectedConversation as any)?.messages);
   const recipient = getOtherParticipant(selectedConversation, currentUserId);
 
@@ -323,8 +354,80 @@ export function InboxWorkspace({
       mailApi.getAll({ type: emailFolder, limit: 25 }).then((response) => response.data),
   });
 
-  const mails: any[] = asArray(mailsResponse?.data?.mails);
-  const selectedMail = mails.find((mail) => String(mail._id) === String(selectedMailId)) || mails[0] || null;
+  const { data: gmailStatusResponse, isLoading: gmailStatusLoading } = useQuery({
+    queryKey: ["gmail-status"],
+    enabled: activeTab === "email",
+    queryFn: () => emailProviderApi.getGmailStatus().then((response) => response.data),
+    retry: false,
+  });
+
+  const gmailStatus = gmailStatusResponse?.data;
+  const gmailConnected = Boolean(gmailStatus?.connected);
+
+  const { data: gmailInboxResponse, isLoading: gmailInboxLoading } = useQuery({
+    queryKey: ["gmail-inbox"],
+    enabled: activeTab === "email" && emailFolder === "inbox" && gmailConnected,
+    queryFn: () =>
+      emailProviderApi
+        .getGmailInbox({ maxResults: 25 })
+        .then((response) => response.data),
+    retry: false,
+  });
+
+  const localMails: any[] = asArray(mailsResponse?.data?.mails);
+  const gmailMails = useMemo(
+    () =>
+      asArray(gmailInboxResponse?.data?.messages).map((message: any) => {
+        const from = parseEmailIdentity(message.from);
+
+        return {
+          _id: `gmail-${message.id}`,
+          provider: "gmail",
+          providerMessageId: message.id,
+          threadId: message.threadId,
+          from,
+          toEmails: gmailStatus?.email ? [gmailStatus.email] : [],
+          subject: message.subject || "(No subject)",
+          body: message.snippet || "",
+          snippet: message.snippet || "",
+          createdAt: message.date,
+          attachments: [],
+        };
+      }),
+    [gmailInboxResponse?.data?.messages, gmailStatus?.email],
+  );
+  const mails: any[] = emailFolder === "inbox" ? [...gmailMails, ...localMails] : localMails;
+  const selectedMailBase = mails.find((mail) => String(mail._id) === String(selectedMailId)) || mails[0] || null;
+  const selectedGmailMessageId =
+    selectedMailBase?.provider === "gmail" ? selectedMailBase.providerMessageId : "";
+
+  const { data: gmailMessageResponse, isLoading: gmailMessageLoading } = useQuery({
+    queryKey: ["gmail-message", selectedGmailMessageId],
+    enabled: activeTab === "email" && Boolean(selectedGmailMessageId),
+    queryFn: () =>
+      emailProviderApi
+        .getGmailMessage(String(selectedGmailMessageId))
+        .then((response) => response.data),
+    retry: false,
+  });
+
+  const selectedMail = useMemo(() => {
+    if (!selectedMailBase) return null;
+    const details = gmailMessageResponse?.data;
+    if (selectedMailBase.provider !== "gmail" || !details) return selectedMailBase;
+
+    return {
+      ...selectedMailBase,
+      subject: details.subject || selectedMailBase.subject,
+      from: parseEmailIdentity(details.from),
+      toEmails: details.to ? [details.to] : selectedMailBase.toEmails,
+      body: details.body || selectedMailBase.body,
+      bodyHtml: details.bodyHtml || "",
+      attachments: details.attachments || [],
+      createdAt: details.date || selectedMailBase.createdAt,
+    };
+  }, [gmailMessageResponse?.data, selectedMailBase]);
+  const emailListLoading = mailsLoading || gmailStatusLoading || gmailInboxLoading;
 
   useEffect(() => {
     if (activeTab !== "email") return;
@@ -354,10 +457,38 @@ export function InboxWorkspace({
       });
     },
     onSuccess: (response) => {
-      const realId = response.data?.data?.conversationId;
+      const payload = response.data?.data;
+      const realId = payload?.conversationId;
+      const sentMessage = payload?.message;
       queryClient.invalidateQueries({ queryKey: ["inbox-conversations"] });
       if (realId) {
         setSelectedId(String(realId));
+        queryClient.setQueryData(["inbox-conversation", String(realId)], (current: any) => {
+          const base = current?.data || selectedConversation || {
+            _id: realId,
+            participants: [
+              { _id: currentUserId, name: session?.user?.name },
+              payload?.recipient || recipient,
+            ].filter(Boolean),
+            messages: [],
+            isGroup: false,
+          };
+          const exists = asArray(base.messages).some(
+            (message: any) => String(message._id) === String(sentMessage?._id)
+          );
+          return {
+            ...(current || {}),
+            data: {
+              ...base,
+              _id: realId,
+              lastMessage: sentMessage?.content || sentMessage?.fileName || base.lastMessage || "",
+              lastMessageAt: sentMessage?.sentAt || base.lastMessageAt || new Date().toISOString(),
+              messages: sentMessage && !exists
+                ? [...asArray(base.messages), sentMessage]
+                : asArray(base.messages),
+            },
+          };
+        });
         queryClient.invalidateQueries({ queryKey: ["inbox-conversation", String(realId)] });
       }
       setDraft("");
@@ -427,6 +558,20 @@ export function InboxWorkspace({
     },
     onError: (error: any) =>
       toast.error(error?.response?.data?.message || "Failed to send email"),
+  });
+
+  const connectGmailMutation = useMutation({
+    mutationFn: () => emailProviderApi.initGmail().then((response) => response.data),
+    onSuccess: (response) => {
+      const authUrl = response?.data?.authUrl;
+      if (authUrl && typeof window !== "undefined") {
+        window.location.href = authUrl;
+        return;
+      }
+      toast.error("Gmail connection URL was not returned");
+    },
+    onError: (error: any) =>
+      toast.error(error?.response?.data?.message || "Failed to start Gmail connection"),
   });
 
   useEffect(() => {
@@ -1479,18 +1624,36 @@ export function InboxWorkspace({
                 </div>
               </div>
               <div className="flex-1 overflow-y-auto">
-                {mailsLoading ? (
+                {emailListLoading ? (
                   <div className="space-y-3 p-3">
                     {Array.from({ length: 5 }).map((_, index) => (
                       <Skeleton key={index} className="h-16 w-full" />
                     ))}
                   </div>
                 ) : mails.length === 0 ? (
-                  <div className="p-6 text-center text-xs text-gray-500">No emails found.</div>
+                  <div className="space-y-3 p-6 text-center text-xs text-gray-500">
+                    {emailFolder === "inbox" && !gmailConnected ? (
+                      <>
+                        <p>Connect Gmail to show inbox emails here.</p>
+                        <Button
+                          size="sm"
+                          onClick={() => connectGmailMutation.mutate()}
+                          disabled={connectGmailMutation.isPending}
+                        >
+                          <Mail className="h-3.5 w-3.5" />
+                          {connectGmailMutation.isPending ? "Connecting..." : "Connect Gmail"}
+                        </Button>
+                      </>
+                    ) : (
+                      <p>No emails found.</p>
+                    )}
+                  </div>
                 ) : (
                   mails.map((mail) => {
                     const actor =
-                      emailFolder === "inbox" ? mail.from?.name : mail.to?.[0]?.name || mail.toEmails?.[0];
+                      emailFolder === "inbox"
+                        ? mail.from?.name || mail.from?.email
+                        : mail.to?.[0]?.name || mail.toEmails?.[0];
                     return (
                       <button
                         key={mail._id}
@@ -1507,7 +1670,7 @@ export function InboxWorkspace({
                           <span className="text-[10px] text-gray-500">{formatLastTime(mail.createdAt)}</span>
                         </div>
                         <p className="truncate text-xs text-gray-400">{mail.subject || "(No subject)"}</p>
-                        <p className="truncate text-[11px] text-gray-500">{mail.body || "No body"}</p>
+                        <p className="truncate text-[11px] text-gray-500">{mail.snippet || mail.body || "No body"}</p>
                       </button>
                     );
                   })
@@ -1550,19 +1713,23 @@ export function InboxWorkspace({
                             {selectedMail.toEmails?.join(", ") || recipient?.email || ""}
                           </p>
                         </div>
-                        <button
-                          type="button"
-                          onClick={() =>
-                            mailApi.toggleStar(String(selectedMail._id)).then(() =>
-                              queryClient.invalidateQueries({ queryKey: ["mail-list"] })
-                            )
-                          }
-                          className="rounded-full border border-[#1e2d40] p-2 text-gray-300 hover:text-yellow-300"
-                        >
-                          <Pin className="h-4 w-4" />
-                        </button>
+                        {selectedMail.provider !== "gmail" ? (
+                          <button
+                            type="button"
+                            onClick={() =>
+                              mailApi.toggleStar(String(selectedMail._id)).then(() =>
+                                queryClient.invalidateQueries({ queryKey: ["mail-list"] })
+                              )
+                            }
+                            className="rounded-full border border-[#1e2d40] p-2 text-gray-300 hover:text-yellow-300"
+                          >
+                            <Pin className="h-4 w-4" />
+                          </button>
+                        ) : null}
                       </div>
-                      <p className="whitespace-pre-wrap text-sm text-gray-200">{selectedMail.body || "No message body."}</p>
+                      <p className="whitespace-pre-wrap text-sm text-gray-200">
+                        {gmailMessageLoading ? "Loading email..." : selectedMail.body || "No message body."}
+                      </p>
                     </div>
                     <div className="rounded-2xl border border-[#1e2d40] bg-[#0a1628] p-4">
                       <h4 className="mb-3 text-sm font-semibold text-gray-100">Attachments</h4>
@@ -1947,7 +2114,45 @@ function NewConversationDialog({
     enabled: open,
   });
 
-  const recipients: any[] = asArray(recipientsResponse?.data);
+  const { data: employeesResponse, isLoading: employeesLoading } = useQuery({
+    queryKey: ["inbox-employee-recipients"],
+    queryFn: () => employeesApi.getAll({ limit: 100 }).then((response) => response.data),
+    enabled: open,
+  });
+
+  const recipients: any[] = useMemo(() => {
+    const term = query.trim().toLowerCase();
+    const apiRecipients = asArray(recipientsResponse?.data);
+    const employeeRecipients = asArray(employeesResponse?.data)
+      .map((employee: any) => {
+        const user = employee?.userId;
+        const userId = user?._id || (typeof user === "string" ? user : "");
+        if (!userId) return null;
+        return {
+          ...user,
+          _id: userId,
+          name: user?.name || employee?.name || "Employee",
+          email: user?.email || employee?.email,
+          phoneNumber: user?.phoneNumber || employee?.phoneNumber,
+          profileImage: user?.profileImage || employee?.profileImage,
+          role: employee?.position || user?.role || "Employee",
+          employee,
+        };
+      })
+      .filter(Boolean);
+
+    const merged = [...apiRecipients, ...employeeRecipients].filter((person: any) => {
+      if (!term) return true;
+      const haystack = `${person?.name || ""} ${person?.email || ""} ${person?.role || ""} ${person?.phoneNumber || ""}`.toLowerCase();
+      return haystack.includes(term);
+    });
+
+    return merged.filter(
+      (person: any, index: number) =>
+        person?._id && merged.findIndex((item: any) => String(item?._id) === String(person._id)) === index
+    );
+  }, [employeesResponse?.data, query, recipientsResponse?.data]);
+  const recipientsLoading = isLoading || employeesLoading;
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -1965,7 +2170,7 @@ function NewConversationDialog({
           />
         </div>
         <div className="max-h-100 space-y-1 overflow-y-auto">
-          {isLoading ? (
+          {recipientsLoading ? (
             Array.from({ length: 4 }).map((_, index) => (
               <Skeleton key={index} className="h-12 w-full" />
             ))

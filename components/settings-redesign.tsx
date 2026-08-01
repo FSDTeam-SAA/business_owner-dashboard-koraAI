@@ -58,6 +58,8 @@ import {
   subscriptionApi,
   userApi,
 } from "@/lib/api";
+import { useDashboardI18n } from "@/lib/dashboard-i18n";
+import { useDashboardTheme } from "@/lib/dashboard-theme";
 import { asArray, getInitials } from "@/lib/utils";
 import { toast } from "sonner";
 
@@ -101,6 +103,8 @@ const tabIcons: Record<TabId, ElementType> = {
 const card = "overflow-hidden border-[#182a40] bg-[#071725]/95 shadow-[inset_0_1px_0_rgba(255,255,255,0.03)]";
 const panel = "rounded-xl border border-[#182a40] bg-[#0b1a2c]/90";
 const input = "h-9 border-[#1c3048] bg-[#081523] text-sm text-gray-200 placeholder:text-gray-600 focus-visible:ring-blue-500 2xl:h-10";
+const LANGUAGE_OPTIONS = ["Czech", "English", "German"];
+const THEME_OPTIONS = ["Dark", "Light"];
 
 type ProfileData = {
   name?: string;
@@ -156,7 +160,7 @@ function profileValue(profile: ProfileData | undefined, key: keyof ProfileData, 
 
 function inputValue(name: string, fallback = "") {
   if (typeof document === "undefined") return fallback;
-  return document.querySelector<HTMLInputElement>(`input[name="${name}"]`)?.value?.trim() || fallback;
+  return document.querySelector<HTMLInputElement | HTMLSelectElement>(`[name="${name}"]`)?.value?.trim() || fallback;
 }
 
 function fileValue(name: string) {
@@ -202,7 +206,68 @@ function Field({ label, value, type = "text", name }: { label: string; value?: s
   );
 }
 
-function SelectField({ label, value, icon: Icon = Globe }: { label: string; value: string; icon?: ElementType }) {
+const normalizeLanguage = (value?: string) => {
+  const text = String(value || "").toLowerCase();
+  if (text.includes("czech") || text.includes("cestina") || text.includes("cz")) return "Czech";
+  if (text.includes("german") || text.includes("deutsch") || text.includes("de")) return "German";
+  return "English";
+};
+
+function SelectField({ label, value, icon: Icon = Globe, options }: { label: string; value: string; icon?: ElementType; options?: string[] }) {
+  const isLanguageField = label.toLowerCase().includes("language");
+  const isThemeField = label.toLowerCase() === "theme";
+  const { language, setLanguage, t } = useDashboardI18n();
+  const { theme, setTheme } = useDashboardTheme();
+  const optionList = options || (isLanguageField ? LANGUAGE_OPTIONS : isThemeField ? THEME_OPTIONS : []);
+  const normalizedValue = !optionList.length
+    ? value
+    : isLanguageField
+      ? language
+      : isThemeField
+        ? theme
+      : optionList.includes(value)
+        ? value
+        : optionList.includes(normalizeLanguage(value))
+          ? normalizeLanguage(value)
+          : optionList[0];
+  const [selected, setSelected] = useState(normalizedValue);
+
+  useEffect(() => {
+    setSelected(normalizedValue);
+  }, [normalizedValue]);
+
+  if (optionList.length) {
+    return (
+      <div className="space-y-1.5">
+        <Label className="text-xs text-gray-300">{label}</Label>
+        <div className="relative">
+          <Icon className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
+          <select
+            name={label}
+            value={selected}
+            onChange={(event) => {
+              setSelected(event.target.value);
+              if (isLanguageField) {
+                setLanguage(event.target.value as "Czech" | "English" | "German");
+              }
+              if (isThemeField) {
+                setTheme(event.target.value as "Dark" | "Light");
+              }
+            }}
+            className="h-9 w-full appearance-none rounded-lg border border-[#1c3048] bg-[#081523] pl-9 pr-9 text-sm text-gray-200 outline-none focus:border-blue-500 2xl:h-10"
+          >
+            {optionList.map((option) => (
+              <option key={option} value={option}>
+                {isLanguageField ? option : t(option)}
+              </option>
+            ))}
+          </select>
+          <ChevronDown className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-500" />
+        </div>
+      </div>
+    );
+  }
+
   return <div className="space-y-1.5"><Label className="text-xs text-gray-300">{label}</Label><input type="hidden" name={label} value={value} readOnly /><button type="button" className="flex h-9 w-full items-center justify-between rounded-lg border border-[#1c3048] bg-[#081523] px-3 text-sm text-gray-200 2xl:h-10"><span className="flex min-w-0 items-center gap-2"><Icon className="h-4 w-4 shrink-0 text-gray-400" /><span className="truncate">{value}</span></span><ChevronDown className="h-4 w-4 shrink-0 text-gray-500" /></button></div>;
 }
 
@@ -329,7 +394,7 @@ function General({
             <div className="grid content-start gap-3 sm:grid-cols-2">
               <Field label="Full Name" value={name} />
               <Field label="Email Address" value={email} />
-              <SelectField label="Language" value="English (EN)" />
+              <SelectField label="Language" value={profile?.settings?.business?.defaultLanguage || "English"} options={LANGUAGE_OPTIONS} />
               <SelectField label="Timezone" value={timezone} icon={Clock} />
               <div className="flex justify-end pt-1 sm:col-span-2">
                 <Button onClick={onSave} disabled={isSaving}>{isSaving ? "Saving..." : "Save Changes"}</Button>
@@ -388,7 +453,7 @@ function Business({ profile, onSave, isSaving = false }: { profile?: ProfileData
   const phone = profileValue(profile, "phoneNumber", profileValue(profile, "phone", "+49 30 12345678"));
   const website = profileValue(profile, "website", "https://koraai.de");
   const businessSettings = profile?.settings?.business || {};
-  return <div className="space-y-5"><div className="grid gap-5 lg:grid-cols-[1.2fr_1fr]"><Section title="Business Information" subtitle="Update your business details, logo and category."><div className="grid gap-5 lg:grid-cols-[160px_1fr]"><div className="flex flex-col items-center rounded-xl border border-dashed border-[#1e2d40] p-4"><div className="flex h-24 w-24 items-center justify-center rounded-2xl bg-white"><Sparkles className="h-12 w-12 text-blue-600" /></div><button type="button" className="mt-4 text-sm text-blue-400">Change Logo</button><button type="button" className="mt-2 text-sm text-blue-400">Upload Cover Image</button><p className="mt-2 text-center text-xs text-gray-500">PNG, JPG or SVG<br />Max. 2MB</p></div><div className="grid gap-4 sm:grid-cols-2"><Field label="Business Name" value={businessName} /><SelectField label="Business Category" value={businessSettings.industry || "Software & Technology"} icon={Building2} /><Field label="Business Description" value={profile?.bio || "Service business powered by KoraAI"} /><Field label="Website" value={website} /><div className="sm:col-span-2 flex justify-end pt-4"><Button onClick={onSave} disabled={isSaving}>{isSaving ? "Saving..." : "Save Changes"}</Button></div></div></div></Section><Section title="Contact Information" subtitle="Public contact information used across bookings and website pages."><div className="grid gap-4 sm:grid-cols-2"><Field label="Business Email" value={businessEmail} /><Field label="Business Phone" value={phone} /><Field label="Website URL" value={website} /><SelectField label="Default Language" value={businessSettings.defaultLanguage || "English (EN)"} /></div><Button className="mt-5 w-full" onClick={onSave}>Save Contact Info</Button></Section></div><div className="grid gap-5 lg:grid-cols-3"><Section title="Business Address" subtitle="Your primary business address."><div className="space-y-4"><Field label="Street" value={profileValue(profile, "businessAddress", "Unter den Linden 10")} /><Field label="Address Line 2 (Optional)" value="Suite 5A" /><div className="grid grid-cols-2 gap-3"><Field label="Postal Code" value="10117" /><Field label="City" value="Berlin" /></div><Field label="Country" value="Germany" /><Button onClick={onSave} className="w-full">Save Address</Button></div></Section><Section title="Opening Hours" subtitle="Configure working days, times and breaks."><div className="space-y-3"><SelectField label="Working Days" value="Monday - Friday" icon={Calendar} /><div className="grid grid-cols-2 gap-3"><SelectField label="Opening Time" value="09:00" icon={Clock} /><SelectField label="Closing Time" value="18:00" icon={Clock} /></div><div className="grid grid-cols-2 gap-3"><SelectField label="Break Start" value="13:00" icon={Clock} /><SelectField label="Break End" value="13:30" icon={Clock} /></div><Button className="w-full" onClick={onSave}>Save Hours</Button></div></Section><Section title="Branding" subtitle="Customize brand colors and assets."><div className="space-y-4">{[["Primary Color", "#2563EB", "bg-blue-600"], ["Secondary Color", "#1E293B", "bg-[#1e293b]"], ["Accent Color", "#7C3AED", "bg-purple-600"]].map(([label, value, color]) => <div key={label} className="grid grid-cols-[1fr_120px] gap-3"><Field label={label} value={value} /><div className={`mt-5 h-10 rounded-lg border border-[#1e2d40] ${color}`} /></div>)}<Button className="w-full" onClick={onSave}>Save Branding</Button></div></Section></div><div className="grid gap-5 lg:grid-cols-[1.2fr_1fr]"><Section title="AI Business Context" subtitle="Help Kora AI understand your business to provide better assistance."><textarea name="AI Business Context" className="h-32 w-full resize-none rounded-lg border border-[#1c3048] bg-[#081523] p-3 text-sm text-gray-300 outline-none" defaultValue={businessSettings.aiContext || profile?.bio || `${businessName} is an all-in-one business platform for service-based businesses.`} /></Section><Section title="Business Preferences" subtitle="Set default preferences for your business."><div className="grid gap-4 sm:grid-cols-2"><Field label="Working Hours" value={businessSettings.workingHours || "Mon - Fri, 09:00 - 18:00"} /><SelectField label="Default Currency" value={businessSettings.defaultCurrency || "Euro (EUR)"} icon={Wallet} /><SelectField label="Default Appointment Duration" value={businessSettings.defaultAppointmentDuration || "60 minutes"} icon={Clock} /><SelectField label="Default Language" value={businessSettings.defaultLanguage || "English (EN)"} /></div><Button className="mt-5 w-full" onClick={onSave}>Save Changes</Button></Section></div><ProTip>Complete your business profile to unlock advanced features and get better results.</ProTip></div>;
+  return <div className="space-y-5"><div className="grid gap-5 lg:grid-cols-[1.2fr_1fr]"><Section title="Business Information" subtitle="Update your business details, logo and category."><div className="grid gap-5 lg:grid-cols-[160px_1fr]"><div className="flex flex-col items-center rounded-xl border border-dashed border-[#1e2d40] p-4"><div className="flex h-24 w-24 items-center justify-center rounded-2xl bg-white"><Sparkles className="h-12 w-12 text-blue-600" /></div><button type="button" className="mt-4 text-sm text-blue-400">Change Logo</button><button type="button" className="mt-2 text-sm text-blue-400">Upload Cover Image</button><p className="mt-2 text-center text-xs text-gray-500">PNG, JPG or SVG<br />Max. 2MB</p></div><div className="grid gap-4 sm:grid-cols-2"><Field label="Business Name" value={businessName} /><SelectField label="Business Category" value={businessSettings.industry || "Software & Technology"} icon={Building2} /><Field label="Business Description" value={profile?.bio || "Service business powered by KoraAI"} /><Field label="Website" value={website} /><div className="sm:col-span-2 flex justify-end pt-4"><Button onClick={onSave} disabled={isSaving}>{isSaving ? "Saving..." : "Save Changes"}</Button></div></div></div></Section><Section title="Contact Information" subtitle="Public contact information used across bookings and website pages."><div className="grid gap-4 sm:grid-cols-2"><Field label="Business Email" value={businessEmail} /><Field label="Business Phone" value={phone} /><Field label="Website URL" value={website} /><SelectField label="Default Language" value={businessSettings.defaultLanguage || "English"} /></div><Button className="mt-5 w-full" onClick={onSave}>Save Contact Info</Button></Section></div><div className="grid gap-5 lg:grid-cols-3"><Section title="Business Address" subtitle="Your primary business address."><div className="space-y-4"><Field label="Street" value={profileValue(profile, "businessAddress", "Unter den Linden 10")} /><Field label="Address Line 2 (Optional)" value="Suite 5A" /><div className="grid grid-cols-2 gap-3"><Field label="Postal Code" value="10117" /><Field label="City" value="Berlin" /></div><Field label="Country" value="Germany" /><Button onClick={onSave} className="w-full">Save Address</Button></div></Section><Section title="Opening Hours" subtitle="Configure working days, times and breaks."><div className="space-y-3"><SelectField label="Working Days" value="Monday - Friday" icon={Calendar} /><div className="grid grid-cols-2 gap-3"><SelectField label="Opening Time" value="09:00" icon={Clock} /><SelectField label="Closing Time" value="18:00" icon={Clock} /></div><div className="grid grid-cols-2 gap-3"><SelectField label="Break Start" value="13:00" icon={Clock} /><SelectField label="Break End" value="13:30" icon={Clock} /></div><Button className="w-full" onClick={onSave}>Save Hours</Button></div></Section><Section title="Branding" subtitle="Customize brand colors and assets."><div className="space-y-4">{[["Primary Color", "#2563EB", "bg-blue-600"], ["Secondary Color", "#1E293B", "bg-[#1e293b]"], ["Accent Color", "#7C3AED", "bg-purple-600"]].map(([label, value, color]) => <div key={label} className="grid grid-cols-[1fr_120px] gap-3"><Field label={label} value={value} /><div className={`mt-5 h-10 rounded-lg border border-[#1e2d40] ${color}`} /></div>)}<Button className="w-full" onClick={onSave}>Save Branding</Button></div></Section></div><div className="grid gap-5 lg:grid-cols-[1.2fr_1fr]"><Section title="AI Business Context" subtitle="Help Kora AI understand your business to provide better assistance."><textarea name="AI Business Context" className="h-32 w-full resize-none rounded-lg border border-[#1c3048] bg-[#081523] p-3 text-sm text-gray-300 outline-none" defaultValue={businessSettings.aiContext || profile?.bio || `${businessName} is an all-in-one business platform for service-based businesses.`} /></Section><Section title="Business Preferences" subtitle="Set default preferences for your business."><div className="grid gap-4 sm:grid-cols-2"><Field label="Working Hours" value={businessSettings.workingHours || "Mon - Fri, 09:00 - 18:00"} /><SelectField label="Default Currency" value={businessSettings.defaultCurrency || "Euro (EUR)"} icon={Wallet} /><SelectField label="Default Appointment Duration" value={businessSettings.defaultAppointmentDuration || "60 minutes"} icon={Clock} /><SelectField label="Default Language" value={businessSettings.defaultLanguage || "English"} /></div><Button className="mt-5 w-full" onClick={onSave}>Save Changes</Button></Section></div><ProTip>Complete your business profile to unlock advanced features and get better results.</ProTip></div>;
 }
 
 function Team({ employees = [] }: { employees?: EmployeeData[] } = {}) {
@@ -439,7 +504,7 @@ function AI({ aiHistoryCount = 0, profile, onSave }: { aiHistoryCount?: number; 
         <Section title="Assistant Personality" subtitle="Customize tone, style and business language.">
           <div className="grid gap-5 sm:grid-cols-2">
             <Field label="AI Name" value={aiSettings.name || "Kora"} />
-            <SelectField label="Business Language" value={aiSettings.language || "English (US)"} />
+            <SelectField label="Business Language" value={aiSettings.language || "English"} />
           </div>
           <h4 className="mb-3 mt-5 text-sm font-medium text-gray-100">Tone of Voice</h4>
           <div className="grid gap-3 sm:grid-cols-4">
@@ -730,12 +795,12 @@ export default function SettingsRedesign() {
         workingHours: inputValue("Working Hours", profile?.settings?.business?.workingHours || "Mon - Fri, 09:00 - 18:00"),
         defaultCurrency: inputValue("Default Currency", profile?.settings?.business?.defaultCurrency || "Euro (EUR)"),
         defaultAppointmentDuration: inputValue("Default Appointment Duration", profile?.settings?.business?.defaultAppointmentDuration || "60 minutes"),
-        defaultLanguage: inputValue("Default Language", profile?.settings?.business?.defaultLanguage || "English (EN)"),
+        defaultLanguage: inputValue("Default Language", inputValue("Language", profile?.settings?.business?.defaultLanguage || "English")),
         aiContext: inputValue("AI Business Context", profile?.settings?.business?.aiContext || ""),
       },
       ai: {
         name: inputValue("AI Name", profile?.settings?.ai?.name || "Kora"),
-        language: inputValue("AI Language", profile?.settings?.ai?.language || "English (US)"),
+        language: inputValue("Business Language", profile?.settings?.ai?.language || "English"),
       },
     }));
     const profileImage = profilePhotoFile || fileValue("profileImage");

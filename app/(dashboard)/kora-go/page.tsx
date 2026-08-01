@@ -576,7 +576,7 @@ export default function KoraGoPage() {
             <Card className="shrink-0 bg-[#091526]">
               <CardContent className="p-4">
                 <h2 className="text-base font-semibold text-white">App Administration</h2>
-                <p className="mt-1 text-xs text-gray-400">Manage mobile app permissions and notifications.</p>
+                <p className="mb-3 mt-1 text-xs text-gray-400">Manage mobile app permissions and notifications.</p>
                 <div className="grid grid-cols-2 gap-3">
                   {shortcuts.map((shortcut) => (
                     <button

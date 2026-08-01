@@ -117,6 +117,15 @@ export const mailApi = {
   remove: (id: string) => api.delete(`/mail/${id}`),
 };
 
+export const emailProviderApi = {
+  initGmail: () => api.post("/auth/gmail/init"),
+  getGmailStatus: () => api.get("/gmail/status"),
+  getGmailInbox: (params?: object) => api.get("/gmail/inbox", { params }),
+  getGmailMessage: (id: string) => api.get(`/gmail/inbox/${id}`),
+  sendGmail: (data: { recipient: string; subject?: string; body?: string }) =>
+    api.post("/gmail/send-email", data),
+};
+
 export const koraAssistantApi = {
   sendMessage: (data: { message: string }) => api.post("/kora-assistant/message", data),
   getHistory: (params?: object) => api.get("/kora-assistant/history", { params }),

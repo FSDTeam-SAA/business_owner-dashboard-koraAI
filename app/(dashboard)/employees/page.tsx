@@ -25,20 +25,18 @@ import {
   AlertTriangle,
   ArrowRight,
   CalendarCheck,
-  CalendarClock,
   CalendarDays,
   ChevronLeft,
   ChevronRight,
   Clock,
-  LayoutGrid,
   LogIn,
   LogOut,
   Mail,
+  Pencil,
   Phone,
   Plus,
   Search,
   Star,
-  StickyNote,
   Trash2,
   TrendingUp,
   UserMinus,
@@ -143,7 +141,6 @@ function EmployeesPageContent() {
   const [availabilityFilter, setAvailabilityFilter] = useState("all");
   const [performanceFilter, setPerformanceFilter] = useState("all");
   const [utilizationFilter, setUtilizationFilter] = useState("all");
-  const [view, setView] = useState<"cards" | "schedule">("cards");
   const [employeePage, setEmployeePage] = useState(1);
   const employeePageSize = useViewportPageSize({
     rowHeight: 86,
@@ -527,14 +524,6 @@ function EmployeesPageContent() {
             <option value="balanced">Balanced</option>
             <option value="overbooked">Overbooked</option>
           </select>
-          <div className="ml-auto flex h-10 items-center gap-0.5 rounded-lg bg-[#0d1a2d] p-0.5">
-            <button onClick={() => { setEmployeePage(1); setView("cards"); }} className={`flex items-center gap-1.5 rounded-md px-4 py-2 text-[11px] font-medium transition-colors ${view === "cards" ? "bg-blue-600 text-white shadow-[0_0_14px_rgba(37,99,235,0.45)]" : "text-gray-400"}`}>
-              <LayoutGrid className="h-3.5 w-3.5" /> Cards View
-            </button>
-            <button onClick={() => { setEmployeePage(1); setView("schedule"); }} className={`flex items-center gap-1.5 rounded-md px-4 py-2 text-[11px] font-medium transition-colors ${view === "schedule" ? "bg-blue-600 text-white shadow-[0_0_14px_rgba(37,99,235,0.45)]" : "text-gray-400"}`}>
-              <CalendarClock className="h-3.5 w-3.5" /> Schedule View
-            </button>
-          </div>
         </div>
 
         {/* ── Main grid ── */}
@@ -549,33 +538,6 @@ function EmployeesPageContent() {
               <Card className="flex min-h-0 flex-1 flex-col"><CardContent className="flex min-h-0 flex-1 flex-col items-center justify-center py-16 text-center">
                 <Users className="mb-2 h-10 w-10 text-gray-700" />
                 <p className="text-sm text-gray-400">No employees match your filters.</p>
-              </CardContent></Card>
-            ) : view === "schedule" ? (
-              /* Schedule view */
-              <Card className="flex min-h-0 flex-1 flex-col"><CardContent className="min-h-0 flex-1 overflow-y-auto p-0">
-                <div className="divide-y divide-[#1e2d40]">
-                  {pagedEmployees.map((e) => {
-                    const sm = statusMeta(e.status);
-                    const count = todayCountByUser[String(e.userId?._id)] || 0;
-                    const am = attendanceMeta(attendanceByUser[String(e.userId?._id)]);
-                    return (
-                      <button key={e._id} onClick={() => setSelectedId(e._id)} className="flex w-full items-center gap-3 px-4 py-3 text-left transition-colors hover:bg-[#0d1a2d]">
-                        <Avatar className="h-9 w-9">
-                          {e.userId?.profileImage?.url ? <AvatarImage src={e.userId.profileImage.url} alt={empName(e)} /> : null}
-                          <AvatarFallback className="text-[10px]">{getInitials(empName(e))}</AvatarFallback>
-                        </Avatar>
-                        <div className="min-w-0 flex-1">
-                          <p className="truncate text-sm font-medium text-gray-200">{empName(e)}</p>
-                          <p className="truncate text-[11px] text-gray-500">{e.position}</p>
-                        </div>
-                        <span className={`hidden w-28 items-center gap-1.5 text-[11px] sm:flex ${am.text}`}><span className={`h-2 w-2 rounded-full ${am.dot}`} />{am.label}</span>
-                        <span className={`flex items-center gap-1.5 text-[11px] ${sm.text}`}><span className={`h-2 w-2 rounded-full ${sm.dot}`} />{sm.label}</span>
-                        <span className="w-24 text-right text-[11px] text-gray-400">{count} appt{count === 1 ? "" : "s"} today</span>
-                        <span className={`w-16 text-right text-xs font-semibold ${utilColor(e.utilizationRate || 0)}`}>{e.utilizationRate || 0}%</span>
-                      </button>
-                    );
-                  })}
-                </div>
               </CardContent></Card>
             ) : (
               /* Cards view */
@@ -750,7 +712,12 @@ function ProfilePanel({
 
   const [start, setStart] = useState(employee.workingHours?.start || "09:00");
   const [end, setEnd] = useState(employee.workingHours?.end || "18:00");
+  const [noteOpen, setNoteOpen] = useState(false);
+  const [noteDraft, setNoteDraft] = useState("");
+  const [editingNoteId, setEditingNoteId] = useState<string | null>(null);
+  const [noteVersion, setNoteVersion] = useState(0);
   const employeeNotes = useMemo(() => {
+    void noteVersion;
     if (typeof window === "undefined") return [];
     const ids = new Set(
       [employee?._id, employee?.userId?._id, employee?.userId]
@@ -766,7 +733,73 @@ function ProfilePanel({
     } catch {
       return [];
     }
-  }, [employee]);
+  }, [employee, noteVersion]);
+
+  const openAddNote = () => {
+    setEditingNoteId(null);
+    setNoteDraft("");
+    setNoteOpen(true);
+  };
+
+  const openEditNote = (note: any) => {
+    setEditingNoteId(String(note.id));
+    setNoteDraft(note.body || "");
+    setNoteOpen(true);
+  };
+
+  const handleNoteOpenChange = (open: boolean) => {
+    setNoteOpen(open);
+    if (!open) {
+      setEditingNoteId(null);
+      setNoteDraft("");
+    }
+  };
+
+  const saveNote = () => {
+    const body = noteDraft.trim();
+    if (!body) return;
+
+    const employeeIds = [employee?._id, employee?.userId?._id, employee?.userId]
+      .filter(Boolean)
+      .map((value) => String(value));
+
+    try {
+      const current = JSON.parse(window.localStorage.getItem(EMPLOYEE_NOTES_KEY) || "[]");
+      const notes = asArray(current);
+      const nextNotes = editingNoteId
+        ? notes.map((note: any) =>
+            String(note.id) === editingNoteId
+              ? {
+                  ...note,
+                  body,
+                  updatedAt: new Date().toISOString(),
+                }
+              : note,
+          )
+        : [
+            {
+              id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+              employeeIds,
+              body,
+              createdAt: new Date().toISOString(),
+              authorName: "You",
+            },
+            ...notes,
+          ];
+
+      window.localStorage.setItem(
+        EMPLOYEE_NOTES_KEY,
+        JSON.stringify(nextNotes),
+      );
+      setNoteDraft("");
+      setEditingNoteId(null);
+      setNoteOpen(false);
+      setNoteVersion((version) => version + 1);
+      toast.success(editingNoteId ? "Note updated" : "Note saved");
+    } catch {
+      toast.error(editingNoteId ? "Could not update note" : "Could not save note");
+    }
+  };
 
   const perfStats = [
     { label: "Appointments", value: perf?.monthlyPerformance?.appointments ?? employee.totalAppointments ?? 0, cls: "text-emerald-400" },
@@ -776,6 +809,7 @@ function ProfilePanel({
   ];
 
   return (
+    <>
     <Card className="flex h-full min-h-0 overflow-hidden border-[#173050] bg-gradient-to-br from-[#071321] to-[#0b1a2f] shadow-[inset_0_1px_0_rgba(255,255,255,0.03)]">
       <CardContent className="min-h-0 flex-1 overflow-y-auto p-4">
         {/* Header */}
@@ -868,15 +902,30 @@ function ProfilePanel({
           <div className="mt-4 rounded-xl border border-[#173050] bg-[#0b1728] p-4">
             <div className="mb-3 flex items-center justify-between">
               <p className="text-sm font-semibold text-gray-200">Notes</p>
-              <StickyNote className="h-4 w-4 text-blue-300" />
+              <button
+                type="button"
+                onClick={openAddNote}
+                className="rounded-full border border-[#173050] bg-[#0d1a2d] p-2 text-blue-300 transition-colors hover:border-blue-500/60 hover:bg-blue-600/15 hover:text-blue-200"
+                aria-label="Add note"
+              >
+                <Plus className="h-4 w-4" />
+              </button>
             </div>
             {employeeNotes.length > 0 ? (
               <div className="space-y-2">
                 {employeeNotes.map((note: any) => (
-                  <div key={note.id} className="rounded-lg border border-[#173050] bg-[#0d1a2d] p-3">
+                  <div key={note.id} className="group relative rounded-lg border border-[#173050] bg-[#0d1a2d] p-3 pr-11">
+                    <button
+                      type="button"
+                      onClick={() => openEditNote(note)}
+                      className="absolute right-2 top-2 rounded-md border border-[#173050] bg-[#071321] p-1.5 text-gray-400 opacity-0 transition hover:border-blue-500/60 hover:text-blue-300 group-hover:opacity-100"
+                      aria-label="Edit note"
+                    >
+                      <Pencil className="h-3.5 w-3.5" />
+                    </button>
                     <p className="line-clamp-4 text-xs leading-relaxed text-gray-200">{note.body}</p>
                     <p className="mt-2 text-[10px] text-gray-500">
-                      {note.authorName || "You"} - {formatDate(note.createdAt)}
+                      {note.authorName || "You"} - {formatDate(note.updatedAt || note.createdAt)}
                     </p>
                   </div>
                 ))}
@@ -963,6 +1012,25 @@ function ProfilePanel({
         )}
       </CardContent>
     </Card>
+    <Dialog open={noteOpen} onOpenChange={handleNoteOpenChange}>
+      <DialogContent className="max-w-md">
+        <DialogHeader>
+          <DialogTitle>{editingNoteId ? "Edit Note" : "Add Note"}</DialogTitle>
+        </DialogHeader>
+        <textarea
+          value={noteDraft}
+          onChange={(event) => setNoteDraft(event.target.value)}
+          rows={5}
+          className="w-full resize-none rounded-xl border border-[#1e2d40] bg-[#0a1628] px-3 py-3 text-sm text-gray-100 outline-none placeholder:text-gray-500"
+          placeholder="Write a private note about this contact..."
+        />
+        <div className="flex justify-end gap-2">
+          <Button variant="outline" onClick={() => handleNoteOpenChange(false)}>Cancel</Button>
+          <Button onClick={saveNote} disabled={!noteDraft.trim()}>{editingNoteId ? "Update Note" : "Save Note"}</Button>
+        </div>
+      </DialogContent>
+    </Dialog>
+    </>
   );
 }
 

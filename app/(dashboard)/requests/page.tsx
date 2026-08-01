@@ -538,7 +538,8 @@ export default function RequestsPage() {
 
         {/* ── Main grid ── */}
           {/* Request list */}
-          <div className="min-h-0 flex-1 space-y-3 overflow-y-auto rounded-xl border border-[#173050] bg-[#071321]/45 p-3">
+          <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl border border-[#173050] bg-[#071321]/45">
+            <div className="min-h-0 flex-1 space-y-3 overflow-y-auto p-3">
             {loading ? (
               Array.from({ length: 4 }).map((_, i) => <Skeleton key={i} className="h-28 w-full" />)
             ) : visible.length === 0 ? (
@@ -657,8 +658,9 @@ export default function RequestsPage() {
                 );
               })
             )}
+            </div>
             {!loading && visible.length > 0 ? (
-              <div className="flex shrink-0 flex-wrap items-center justify-between gap-3 border-t border-[#173050] pt-3">
+              <div className="flex shrink-0 flex-wrap items-center justify-between gap-3 border-t border-[#173050] bg-[#071321]/70 px-3 py-3">
                 <p className="text-xs text-gray-500">
                   Showing {(Math.min(requestPage, requestPageCount) - 1) * requestPageSize + 1}
                   -{Math.min(Math.min(requestPage, requestPageCount) * requestPageSize, visible.length)} of {visible.length} requests
