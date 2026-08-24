@@ -421,7 +421,7 @@ export default function BusinessOwnerDashboard() {
           ))}
         </div>
 
-        {/* ── Today's Schedule + Kora Assistant ── */}
+        {/* ── Today's Schedule + Kora Assistant ----------------------------------------------── */}
         <div className="grid min-h-0 flex-1 grid-cols-1 gap-3 lg:grid-cols-2">
           {/* Today's Schedule */}
           <Card className="flex min-h-0 flex-col bg-gradient-to-br from-[#071321] to-[#09192b]">
