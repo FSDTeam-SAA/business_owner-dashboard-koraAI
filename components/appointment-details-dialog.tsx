@@ -29,7 +29,6 @@ import {
 import {
   CalendarDays,
   CalendarPlus,
-  Check,
   Clock,
   DollarSign,
   Mail,
@@ -44,6 +43,9 @@ import {
 import { asArray, getInitials } from "@/lib/utils";
 import { DatePickerPopover } from "@/components/date-picker-popover";
 import { TimePickerPopover } from "@/components/time-picker-popover";
+import { OwnerCustomFieldValues } from "@/components/owner/custom-field-values";
+import { apiError } from "@/lib/owner-overview";
+import { ownerCalendarApi } from "@/lib/owner-calendar";
 
 const STATUS_META: Record<string, { label: string; color: string; dot: string }> = {
   upcoming: { label: "Upcoming", color: "text-blue-400", dot: "bg-blue-400" },
@@ -65,12 +67,6 @@ const COLOR_SWATCHES = [
   "#6b7280",
 ];
 
-const LOCATION_OPTIONS = [
-  "Fade Masters Barbershop",
-  "Downtown Salon",
-  "Mobile Visit",
-  "Customer Location",
-];
 
 const format12 = (value: string) => {
   if (!value) return "--:--";
@@ -143,13 +139,12 @@ export function AppointmentDetailsDialog({ open, onOpenChange, appointmentId }: 
   const [editLocation, setEditLocation] = useState("");
   const [editColor, setEditColor] = useState(COLOR_SWATCHES[0]);
   const [editNotes, setEditNotes] = useState("");
+  const [showFullHistory, setShowFullHistory] = useState(false);
 
-  const { data: appointmentResponse, isLoading } = useQuery({
+  const { data: appointmentResponse, isLoading, error: appointmentError, refetch: reloadAppointment } = useQuery({
     queryKey: ["appointment-detail", appointmentId],
     queryFn: () =>
-      appointmentsApi
-        .getById(String(appointmentId))
-        .then((response) => response.data?.data),
+      ownerCalendarApi.appointment(String(appointmentId)),
     enabled: Boolean(appointmentId) && open,
   });
 
@@ -187,27 +182,30 @@ export function AppointmentDetailsDialog({ open, onOpenChange, appointmentId }: 
     return [];
   }, [historyResponse?.data]);
 
+  // Refill the editable draft when a different appointment is opened or refreshed.
+  /* eslint-disable react-hooks/set-state-in-effect */
   useEffect(() => {
     if (!open) {
       setMode("view");
+      setShowFullHistory(false);
       return;
     }
     if (appointment) {
       setEditTitle(appointment.title || "");
       setEditService(appointment.service || "");
-      const date = new Date(appointment.appointmentDate);
-      setEditDate(toISODate(date));
+      setEditDate(appointment.displayDate || toISODate(new Date(appointment.appointmentDate)));
       setEditStartTime(appointment.startTime || "09:00");
       setEditEndTime(appointment.endTime || "10:00");
-      setEditLocation(appointment.location || LOCATION_OPTIONS[0]);
+      setEditLocation(appointment.location || "");
       setEditColor(appointment.color || COLOR_SWATCHES[0]);
       setEditNotes(appointment.bookingNotes || "");
     }
   }, [open, appointment]);
+  /* eslint-enable react-hooks/set-state-in-effect */
 
   const updateMutation = useMutation({
     mutationFn: async (payload: any) => {
-      const response = await appointmentsApi.update(String(appointmentId), payload);
+      const response = appointment?.org_id ? await ownerCalendarApi.updateAppointment(String(appointmentId), payload) : await appointmentsApi.update(String(appointmentId), payload);
       try {
         await calendarApi.sync();
       } catch {
@@ -220,6 +218,7 @@ export function AppointmentDetailsDialog({ open, onOpenChange, appointmentId }: 
       queryClient.invalidateQueries({ queryKey: ["calendar-appointments"] });
       queryClient.invalidateQueries({ queryKey: ["calendar-events"] });
       queryClient.invalidateQueries({ queryKey: ["appointments"] });
+      queryClient.invalidateQueries({ queryKey: ["owner-calendar"] });
       if (variables?.status === "cancelled") {
         toast.success("Appointment cancelled");
         onOpenChange(false);
@@ -249,7 +248,7 @@ export function AppointmentDetailsDialog({ open, onOpenChange, appointmentId }: 
     if (editColor !== (original.color || "")) payload.color = editColor;
     if (editNotes !== (original.bookingNotes || "")) payload.bookingNotes = editNotes;
 
-    const originalISO = toISODate(new Date(original.appointmentDate));
+    const originalISO = original.displayDate || toISODate(new Date(original.appointmentDate));
     const dateChanged = editDate !== originalISO;
     const startChanged = editStartTime !== (original.startTime || "");
     const endChanged = editEndTime !== (original.endTime || "");
@@ -286,7 +285,8 @@ export function AppointmentDetailsDialog({ open, onOpenChange, appointmentId }: 
           <DialogHeader>
             <DialogTitle>Appointment Details</DialogTitle>
           </DialogHeader>
-          <p className="text-sm text-gray-500">Loading appointment...</p>
+          <p className="text-sm text-gray-500" role="alert">{appointmentError ? apiError(appointmentError) : 'Appointment unavailable.'}</p>
+          <Button variant="outline" onClick={() => reloadAppointment()}>Retry</Button>
         </DialogContent>
       </Dialog>
     );
@@ -296,7 +296,7 @@ export function AppointmentDetailsDialog({ open, onOpenChange, appointmentId }: 
   const statusMeta = STATUS_META[status] || STATUS_META.upcoming;
   const customer = appointment?.customer || appointment?.client;
   const employee = appointment?.employee;
-  const duration = computeDuration(
+  const duration = appointment?.startsAt && appointment?.endsAt ? Math.round((Date.parse(appointment.endsAt) - Date.parse(appointment.startsAt)) / 60000) : computeDuration(
     appointment?.startTime || "",
     appointment?.endTime || ""
   );
@@ -315,6 +315,8 @@ export function AppointmentDetailsDialog({ open, onOpenChange, appointmentId }: 
               <DialogTitle className="text-xl">Appointment Details</DialogTitle>
             </div>
           </DialogHeader>
+
+          {appointment?.org_id && <p className="text-xs leading-6 text-gray-400">Times are shown in {appointment.timezone}. The booked service lasts {duration} minutes; its service and location stay fixed when rescheduling.</p>}
 
           {isLoading ? (
             <p className="text-sm text-gray-500">Loading appointment...</p>
@@ -349,21 +351,24 @@ export function AppointmentDetailsDialog({ open, onOpenChange, appointmentId }: 
                     <button
                       className="flex h-8 w-8 items-center justify-center rounded-lg bg-[#1e2d40] text-gray-300 hover:text-blue-400"
                       aria-label="Call"
-                      onClick={() => toast.info("Call action — not wired yet")}
+                      disabled={!customer?.phone && !customer?.phoneNumber}
+                      onClick={() => { window.location.href = `tel:${encodeURIComponent(customer?.phone || customer?.phoneNumber || '')}`; }}
                     >
                       <Phone className="h-3.5 w-3.5" />
                     </button>
                     <button
                       className="flex h-8 w-8 items-center justify-center rounded-lg bg-[#1e2d40] text-gray-300 hover:text-blue-400"
                       aria-label="Message"
-                      onClick={() => toast.info("Message action — not wired yet")}
+                      disabled={!customer?.phone && !customer?.phoneNumber}
+                      onClick={() => { window.location.href = `sms:${encodeURIComponent(customer?.phone || customer?.phoneNumber || '')}`; }}
                     >
                       <MessageCircle className="h-3.5 w-3.5" />
                     </button>
                     <button
                       className="flex h-8 w-8 items-center justify-center rounded-lg bg-[#1e2d40] text-gray-300 hover:text-blue-400"
                       aria-label="Email"
-                      onClick={() => toast.info("Email action — not wired yet")}
+                      disabled={!customer?.email}
+                      onClick={() => { window.location.href = `mailto:${encodeURIComponent(customer?.email || '')}`; }}
                     >
                       <Mail className="h-3.5 w-3.5" />
                     </button>
@@ -374,7 +379,7 @@ export function AppointmentDetailsDialog({ open, onOpenChange, appointmentId }: 
                   {/* Service */}
                   <Row label="Service" icon={<Scissors className="h-3.5 w-3.5 text-gray-500" />}>
                     {mode === "edit" ? (
-                      <Select value={editService} onValueChange={setEditService}>
+                      <Select value={editService} onValueChange={setEditService} disabled={!!appointment.org_id}>
                         <SelectTrigger className="h-8 w-44 text-xs">
                           <SelectValue placeholder={appointment.service || "Select"} />
                         </SelectTrigger>
@@ -424,7 +429,7 @@ export function AppointmentDetailsDialog({ open, onOpenChange, appointmentId }: 
                       </button>
                     ) : (
                       <span className="text-sm text-gray-100">
-                        {formatDateLong(appointment.appointmentDate)}
+                        {formatDateLong(appointment.displayDate ? `${appointment.displayDate}T12:00:00` : appointment.appointmentDate)}
                       </span>
                     )}
                   </Row>
@@ -452,21 +457,10 @@ export function AppointmentDetailsDialog({ open, onOpenChange, appointmentId }: 
                   {/* Location */}
                   <Row label="Location" icon={<MapPin className="h-3.5 w-3.5 text-gray-500" />}>
                     {mode === "edit" ? (
-                      <Select value={editLocation} onValueChange={setEditLocation}>
-                        <SelectTrigger className="h-8 w-44 text-xs">
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {LOCATION_OPTIONS.map((value) => (
-                            <SelectItem key={value} value={value}>
-                              {value}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
+                      <Input className="h-8 w-44 text-xs" value={editLocation} onChange={event => setEditLocation(event.target.value)} maxLength={160} placeholder="Appointment location" disabled={!!appointment.org_id} />
                     ) : (
                       <span className="text-sm text-gray-100">
-                        {appointment.location || "—"}
+                        {appointment.locationLabel || appointment.location || "—"}
                       </span>
                     )}
                   </Row>
@@ -541,6 +535,8 @@ export function AppointmentDetailsDialog({ open, onOpenChange, appointmentId }: 
 
               {/* RIGHT */}
               <div className="space-y-4">
+                <OwnerCustomFieldValues entity="appointment" recordId={appointment._id} />
+                {appointment.customer?._id && <OwnerCustomFieldValues entity="customer" recordId={appointment.customer._id} />}
                 {/* Notes */}
                 <div>
                   <div className="mb-1 flex items-center justify-between">
@@ -573,7 +569,7 @@ export function AppointmentDetailsDialog({ open, onOpenChange, appointmentId }: 
                     {history.length === 0 ? (
                       <p className="text-xs text-gray-500">No prior appointments.</p>
                     ) : (
-                      history.slice(0, 4).map((item: any, index: number) => (
+                      history.slice(0, showFullHistory ? history.length : 4).map((item: any, index: number) => (
                         <div
                           key={item._id || index}
                           className="flex items-center justify-between border-b border-[#1e2d40] py-1.5 text-xs last:border-0"
@@ -592,8 +588,8 @@ export function AppointmentDetailsDialog({ open, onOpenChange, appointmentId }: 
                     )}
                   </div>
                   {history.length > 4 ? (
-                    <button className="mt-2 w-full rounded-lg bg-[#1e2d40] py-1.5 text-center text-xs text-gray-300 hover:bg-[#2a3547]">
-                      View full history
+                    <button onClick={() => setShowFullHistory(!showFullHistory)} className="mt-2 w-full rounded-lg bg-[#1e2d40] py-1.5 text-center text-xs text-gray-300 hover:bg-[#2a3547]">
+                      {showFullHistory ? 'Show recent history' : 'View full history'}
                     </button>
                   ) : null}
                 </div>
@@ -612,8 +608,7 @@ export function AppointmentDetailsDialog({ open, onOpenChange, appointmentId }: 
                       >
                         <span className="text-gray-200">{reminder.label}</span>
                         <div className="flex items-center gap-2">
-                          <span className="text-gray-400">{reminder.note}</span>
-                          <Check className="h-3.5 w-3.5 text-emerald-400" />
+                          <span className="text-gray-400">Not configured</span>
                         </div>
                       </div>
                     ))}

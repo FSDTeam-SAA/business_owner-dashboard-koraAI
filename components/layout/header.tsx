@@ -1,138 +1,30 @@
 "use client";
-import { Menu, Search } from "lucide-react";
+
+import { ChevronDown, Menu } from "lucide-react";
 import { useSession, signOut } from "next-auth/react";
 import { useQuery } from "@tanstack/react-query";
-import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
-import { getInitials } from "@/lib/utils";
-import { Input } from "@/components/ui/input";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuLabel,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
 import Link from "next/link";
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { useMobileNav } from "@/components/layout/mobile-nav-context";
 import { NotificationBell } from "@/components/notification-bell";
+import { SearchDialog } from "@/components/owner/search-dialog";
 import { userApi } from "@/lib/api";
+import { getInitials } from "@/lib/utils";
 import { useDashboardI18n } from "@/lib/dashboard-i18n";
 
-interface HeaderProps {
-  title: string;
-  subtitle?: string;
-  action?: React.ReactNode;
-}
-
+type HeaderProps = { title: string; subtitle?: string; action?: React.ReactNode };
 export function Header({ title, subtitle, action }: HeaderProps) {
   const { data: session } = useSession();
   const { setIsOpen } = useMobileNav();
   const { t } = useDashboardI18n();
-
-  const { data: profileResponse } = useQuery({
-    queryKey: ["user-profile"],
-    queryFn: () => userApi.getProfile().then((r) => r.data),
-    staleTime: 5 * 60 * 1000,
-  });
-
-  const profileData = profileResponse?.data;
-  const sessionUser = session?.user as
-    | { name?: string; role?: string; profileImage?: { url?: string } }
-    | undefined;
-
-  const displayName = profileData?.name || sessionUser?.name || "Business Owner";
-  const displayImage = profileData?.profileImage?.url || sessionUser?.profileImage?.url || "";
-  const displayRole = profileData?.role || sessionUser?.role || "business_owner";
-  const roleLabel =
-    displayRole === "business_owner"
-      ? "Business Owner"
-      : displayRole === "employee"
-        ? "Employee"
-        : String(displayRole).replace(/_/g, " ");
-
-  return (
-    <header className="sticky top-0 z-30 flex h-[var(--dashboard-header-height,clamp(3.5rem,8dvh,5rem))] shrink-0 items-center gap-2 bg-[#070f1c] px-3 sm:gap-4 sm:px-6">
-      <button
-        type="button"
-        onClick={() => setIsOpen(true)}
-        className="-ml-1 rounded-lg p-2 text-gray-300 hover:bg-[#1e2d40] lg:hidden"
-        aria-label="Open menu"
-      >
-        <Menu className="h-5 w-5" />
-      </button>
-
-      <div className="min-w-0 flex-1">
-        <h2 className="truncate dashboard-fluid-title font-bold text-white">{t(title)}</h2>
-        {subtitle ? (
-          <p className="mt-0.5 hidden truncate text-sm text-gray-400 sm:block">{t(subtitle)}</p>
-        ) : null}
-      </div>
-
-      {action ? <div className="shrink-0">{action}</div> : null}
-
-      <div className="hidden w-48 items-center lg:flex">
-        <div className="relative w-full">
-          <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-500" />
-          <Input
-            type="search"
-            name="kora-dashboard-search"
-            autoComplete="off"
-            placeholder={t("Search anything...")}
-            className="h-8 border-[#1e2d40] bg-[#0d1526] pl-9 text-xs"
-          />
-          <kbd className="absolute right-2 top-1/2 hidden -translate-y-1/2 items-center rounded border border-[#2a3547] px-1.5 py-0.5 text-[10px] text-gray-500 sm:inline-flex">
-            ⌘K
-          </kbd>
-        </div>
-      </div>
-
-      <NotificationBell />
-
-      <DropdownMenu>
-        <DropdownMenuTrigger asChild>
-          <button className="flex shrink-0 items-center gap-2 rounded-lg px-2 py-1.5 transition-colors hover:bg-[#1e2d40]">
-            <Avatar className="h-8 w-8">
-              {displayImage ? (
-                <AvatarImage src={displayImage} alt={displayName} />
-              ) : null}
-              <AvatarFallback className="text-xs">
-                {getInitials(displayName)}
-              </AvatarFallback>
-            </Avatar>
-            <div className="hidden text-left sm:block">
-              <p className="max-w-20 truncate text-xs font-medium text-gray-200">
-                {displayName}
-              </p>
-              <p className="text-[10px] capitalize text-gray-500">{roleLabel}</p>
-            </div>
-            <span className="hidden text-xs text-gray-500 sm:block">▾</span>
-          </button>
-        </DropdownMenuTrigger>
-        <DropdownMenuContent align="end" className="w-48">
-          <DropdownMenuLabel>{t("My Account")}</DropdownMenuLabel>
-          <DropdownMenuSeparator />
-          <DropdownMenuItem asChild>
-            <Link href="/settings">{t("Profile")}</Link>
-          </DropdownMenuItem>
-          <DropdownMenuItem asChild>
-            <Link href="/subscription">{t("Subscription")}</Link>
-          </DropdownMenuItem>
-          <DropdownMenuItem asChild>
-            <Link href="/settings?tab=billing">{t("Billing")}</Link>
-          </DropdownMenuItem>
-          <DropdownMenuItem asChild>
-            <Link href="/help-center">{t("Help Center")}</Link>
-          </DropdownMenuItem>
-          <DropdownMenuSeparator />
-          <DropdownMenuItem
-            className="text-red-400"
-            onClick={() => signOut({ callbackUrl: "/login" })}
-          >
-            {t("Logout")}
-          </DropdownMenuItem>
-        </DropdownMenuContent>
-      </DropdownMenu>
-    </header>
-  );
+  const profile = useQuery({ queryKey: ["user-profile"], queryFn: () => userApi.getProfile().then(r => r.data.data), staleTime: 300_000 });
+  const name = profile.data?.name || session?.user?.name || "Business Owner";
+  const image = profile.data?.profileImage?.url || session?.user?.profileImage?.url;
+  return <header className="nv-header">
+    <button type="button" onClick={() => setIsOpen(true)} className="nv-menu-trigger nv-icon-button" aria-label="Open menu"><Menu size={20} /></button>
+    <div className="nv-header-title"><h2>{t(title)}</h2>{subtitle && <p>{t(subtitle)}</p>}</div>
+    {action && <div className="nv-header-action">{action}</div>}
+    <div className="nv-header-controls"><SearchDialog /><NotificationBell /><DropdownMenu><DropdownMenuTrigger asChild><button className="nv-account-trigger" aria-label="Open account menu"><Avatar className="h-7 w-7">{image && <AvatarImage src={image} alt={name} />}<AvatarFallback className="text-[10px] bg-[#e7e8eb] text-[#16181c]">{getInitials(name)}</AvatarFallback></Avatar><span>{name.split(" ")[0]}</span><ChevronDown size={12} /></button></DropdownMenuTrigger><DropdownMenuContent align="end" className="nv-account-menu"><DropdownMenuLabel><span>{name}</span><small>Business Owner</small></DropdownMenuLabel><DropdownMenuSeparator /><DropdownMenuItem asChild><Link href="/settings?scope=global&section=profile">{t("Profile")}</Link></DropdownMenuItem><DropdownMenuItem asChild><Link href="/subscription">{t("Subscription")}</Link></DropdownMenuItem><DropdownMenuItem asChild><Link href="/settings?scope=global&section=billing">{t("Billing")}</Link></DropdownMenuItem><DropdownMenuItem asChild><Link href="/help-center">{t("Help Center")}</Link></DropdownMenuItem><DropdownMenuItem asChild><Link href="/support">Support</Link></DropdownMenuItem><DropdownMenuItem asChild><Link href="/onboarding">Business setup</Link></DropdownMenuItem><DropdownMenuSeparator /><DropdownMenuLabel>Business tools</DropdownMenuLabel><DropdownMenuItem asChild><Link href="/accounting">{t("Accounting")}</Link></DropdownMenuItem><DropdownMenuItem asChild><Link href="/services">{t("Services")}</Link></DropdownMenuItem><DropdownMenuItem asChild><Link href="/kora-go">Kora Go</Link></DropdownMenuItem><DropdownMenuSeparator /><DropdownMenuItem className="text-red-400" onClick={() => signOut({ callbackUrl: "/login" })}>{t("Logout")}</DropdownMenuItem></DropdownMenuContent></DropdownMenu></div>
+  </header>;
 }

@@ -1,7 +1,8 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 "use client";
 
-import Image from "next/image";
+import "./accounting.css";
+import { useKoraDrawer } from "@/components/owner/kora-drawer";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { accountingApi } from "@/lib/api";
@@ -23,7 +24,6 @@ import { asArray, formatCurrency, formatDate, getInitials } from "@/lib/utils";
 import { toast } from "sonner";
 import {
   AlertTriangle,
-  CalendarDays,
   ChevronDown,
   CreditCard,
   Download,
@@ -35,12 +35,14 @@ import {
   Receipt,
   Send,
   FileText,
-  MoreHorizontal,
   Plus,
 } from "lucide-react";
 import {
   Area,
   AreaChart,
+  Bar,
+  BarChart,
+  CartesianGrid,
   Cell,
   Pie,
   PieChart,
@@ -78,28 +80,6 @@ const formatTooltipCurrency = (value: unknown) => {
   return formatCurrency(Number.isFinite(numericValue) ? numericValue : 0);
 };
 
-const sparklineFor = (seed: number, color: string) => {
-  const points = Array.from({ length: 12 }, (_, index) => {
-    const noise = ((seed * 9301 + index * 49297) % 233280) / 233280;
-    return 8 + Math.round(noise * 16);
-  });
-  const path = points
-    .map((value, index) => `${(index / (points.length - 1)) * 100},${24 - value}`)
-    .join(" ");
-  return (
-    <svg viewBox="0 0 100 24" className="h-6 w-16 shrink-0" preserveAspectRatio="none">
-      <polyline
-        fill="none"
-        stroke={color}
-        strokeWidth="1.5"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        points={path}
-      />
-    </svg>
-  );
-};
-
 const PIE_COLORS: Record<string, string> = {
   paid: "#10b981",
   pending: "#f59e0b",
@@ -108,6 +88,7 @@ const PIE_COLORS: Record<string, string> = {
 };
 
 export default function AccountingPage() {
+  const askKora = useKoraDrawer();
   const queryClient = useQueryClient();
   const headerActionRef = useRef<HTMLDivElement>(null);
   const tableActionRef = useRef<HTMLDivElement>(null);
@@ -129,10 +110,14 @@ export default function AccountingPage() {
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
-    if (params.get("create") !== "invoice") return;
+    const action = params.get("create");
+    if (!action || !['1', 'invoice', 'expense', 'refund'].includes(action)) return;
 
     const openTimer = window.setTimeout(() => {
       setCreateOpen(true);
+      const type = action === '1' ? 'invoice' : action;
+      setCreateType(type);
+      setInvoiceForm(current => ({ ...current, type }));
       params.delete("create");
       const query = params.toString();
       window.history.replaceState(null, "", query ? `/accounting?${query}` : "/accounting");
@@ -166,17 +151,17 @@ export default function AccountingPage() {
     setTableActionOpen(false);
   };
 
-  const { data: dashboardResponse, isLoading: dashboardLoading } = useQuery({
+  const { data: dashboardResponse, isLoading: dashboardLoading, isError: dashboardError, refetch: refreshDashboard } = useQuery({
     queryKey: ["accounting-dashboard"],
     queryFn: () => accountingApi.getDashboard().then((response) => response.data),
   });
 
-  const { data: revenueResponse, isLoading: revenueLoading } = useQuery({
+  const { data: revenueResponse, isLoading: revenueLoading, isError: revenueError, refetch: refreshRevenue } = useQuery({
     queryKey: ["accounting-revenue", period],
     queryFn: () => accountingApi.getRevenue({ period }).then((response) => response.data),
   });
 
-  const { data: invoicesResponse, isLoading: invoicesLoading } = useQuery({
+  const { data: invoicesResponse, isLoading: invoicesLoading, isError: invoicesError, refetch: refreshInvoices } = useQuery({
     queryKey: ["accounting-invoices", page, search, statusFilter],
     queryFn: () =>
       accountingApi
@@ -198,9 +183,8 @@ export default function AccountingPage() {
   const createTypeLabel =
     {
       invoice: "Invoice",
-      quote: "Quote",
       expense: "Expense",
-      credit_note: "Credit Note",
+      refund: "Refund",
     }[createType] || "Invoice";
 
   const createInvoiceMutation = useMutation({
@@ -215,6 +199,7 @@ export default function AccountingPage() {
       queryClient.invalidateQueries({ queryKey: ["accounting-dashboard"] });
       queryClient.invalidateQueries({ queryKey: ["accounting-invoices"] });
       setCreateOpen(false);
+      queryClient.invalidateQueries({ queryKey: ["accounting-revenue"] });
       setCreateType("invoice");
       setInvoiceForm({ amount: "", dueDate: "", description: "", type: "invoice" });
       toast.success(`${createTypeLabel} created`);
@@ -288,29 +273,26 @@ export default function AccountingPage() {
     {
       label: "Revenue Today",
       value: formatCurrency(dashboard.revenueToday || 0),
-      helper: "18% vs yesterday",
+      helper: "Recorded today",
       icon: DollarSign,
       color: "bg-emerald-600",
       spark: "#10b981",
-      seed: 13,
     },
     {
-      label: "Revenue This Week",
+      label: "Revenue · Last 7 Days",
       value: formatCurrency(dashboard.revenueWeek || 0),
-      helper: "12% vs last week",
+      helper: "Rolling seven-day total",
       icon: TrendingUp,
       color: "bg-blue-600",
       spark: "#3b82f6",
-      seed: 27,
     },
     {
       label: "Revenue This Month",
       value: formatCurrency(dashboard.revenueMonth || 0),
-      helper: "24% vs last month",
+      helper: "Month to date",
       icon: TrendingUp,
       color: "bg-purple-600",
       spark: "#a855f7",
-      seed: 5,
     },
     {
       label: "Outstanding Payments",
@@ -319,7 +301,6 @@ export default function AccountingPage() {
       icon: AlertTriangle,
       color: "bg-amber-600",
       spark: "#f59e0b",
-      seed: 19,
     },
   ];
 
@@ -348,8 +329,8 @@ export default function AccountingPage() {
     if (items.length === 0) {
       items.push({
         icon: Sparkles,
-        title: "Finances on track",
-        sub: "No anomalies detected",
+        title: "No outstanding invoices",
+        sub: "Based on your recorded payments",
         color: "bg-emerald-600/15 text-emerald-300",
       });
     }
@@ -370,14 +351,13 @@ export default function AccountingPage() {
         toast.info("Select a pending invoice and use the payment action.");
       },
     },
-    { label: "Create Quote", description: "Create an estimate before invoicing", icon: FileText, onClick: () => openCreateDialog("quote") },
     { label: "Create Expense", description: "Add a business expense", icon: DollarSign, onClick: () => openCreateDialog("expense") },
-    { label: "Create Credit Note", description: "Issue a refund or correction", icon: Receipt, onClick: () => openCreateDialog("credit_note") },
+    { label: "Record Refund", description: "Record a customer refund", icon: FileText, onClick: () => openCreateDialog("refund") },
     { label: "Export Report", description: "Download accounting report data", icon: Download, onClick: () => { setActionOpen(false); setTableActionOpen(false); exportInvoices(); } },
   ];
 
   return (
-    <div className="dashboard-page flex flex-col">
+    <div className="dashboard-page accounting-page flex flex-col">
       <Header
         title="Accounting"
         subtitle="Track your finances, manage invoices and grow your business."
@@ -426,11 +406,11 @@ export default function AccountingPage() {
       />
 
       <Dialog open={createOpen} onOpenChange={setCreateOpen}>
-        <DialogContent>
+        <DialogContent className="ac-dialog">
           <DialogHeader>
             <DialogTitle>Create {createTypeLabel}</DialogTitle>
             <DialogDescription>
-              {createType === "expense"
+              {createType === "refund" ? "Record a customer refund for your business." : createType === "expense"
                 ? "Add a business expense for operational tracking."
                 : createType === "quote"
                   ? "Create an estimate that can later be converted to an invoice."
@@ -478,10 +458,10 @@ export default function AccountingPage() {
       </Dialog>
 
       <Dialog open={Boolean(selectedInvoiceId)} onOpenChange={(open) => !open && setSelectedInvoiceId(null)}>
-        <DialogContent>
+        <DialogContent className="ac-dialog">
           <DialogHeader>
             <DialogTitle>Invoice Detail</DialogTitle>
-            <DialogDescription>Fetched from /api/v1/accounting/:id.</DialogDescription>
+            <DialogDescription>Review the customer, amount and payment status.</DialogDescription>
           </DialogHeader>
           {selectedInvoiceLoading ? (
             <Skeleton className="h-36 w-full" />
@@ -509,11 +489,13 @@ export default function AccountingPage() {
         </DialogContent>
       </Dialog>
 
-      <div className="dashboard-content flex flex-col gap-3 overflow-hidden">
-        <div className="grid min-h-0 flex-1 grid-cols-1 gap-5 overflow-hidden xl:grid-cols-[minmax(0,1fr)_272px]">
-          <div className="flex min-h-0 min-w-0 flex-col gap-3 overflow-hidden">
+      <div className="dashboard-content ac-content">
+        <div className="ac-page-heading"><div><span>BUSINESS FINANCES</span><h1>Accounting overview</h1><p>Your revenue, payments and invoices in one place.</p></div><span className="ac-live-label"><i /> Account records</span></div>
+        {dashboardError && <div className="ac-error" role="alert">Financial summary could not be loaded.<button onClick={() => refreshDashboard()}>Try again</button></div>}
+        <div className="ac-layout">
+          <div className="ac-main">
         {/* Stats with sparklines */}
-        <div className="grid shrink-0 grid-cols-1 gap-3 sm:grid-cols-2 2xl:grid-cols-4">
+        <div className="ac-stats">
           {dashboardLoading
             ? Array.from({ length: 4 }).map((_, index) => (
                 <Card key={index} className="border-[#173050] bg-[radial-gradient(circle_at_100%_0%,rgba(37,99,235,0.12),transparent_34%),linear-gradient(135deg,#071321,#0b1a2f)]">
@@ -534,11 +516,10 @@ export default function AccountingPage() {
                         </div>
                         <div className="min-w-0">
                           <p className="truncate text-[11px] font-medium text-gray-300">{item.label}</p>
-                          <p className="mt-2 text-2xl font-bold leading-none text-white">{item.value}</p>
+                          <p className="mt-2 text-2xl font-bold leading-none text-white">{dashboardError ? '—' : item.value}</p>
                           <p className="mt-2 truncate text-[11px] text-emerald-400">{item.helper}</p>
                         </div>
                       </div>
-                      {sparklineFor(item.seed, item.spark)}
                     </div>
                   </CardContent>
                 </Card>
@@ -546,46 +527,43 @@ export default function AccountingPage() {
         </div>
 
             {/* Revenue chart */}
-            <Card className="shrink-0">
+            <Card className="ac-chart-panel">
               <CardHeader>
                 <div className="flex items-center justify-between gap-3 flex-wrap">
-                  <CardTitle className="text-sm">Revenue Overview</CardTitle>
+                  <div><CardTitle className="text-sm">Revenue overview</CardTitle><p className="ac-panel-caption">{period === 'day' ? 'Daily totals · last 30 days' : period === 'week' ? 'Weekly totals · last 12 weeks' : 'Monthly totals · last 12 months'}</p></div>
                   <div className="flex items-center gap-3">
                     <div className="flex gap-1 bg-[#0d1a2d] p-1 rounded-lg">
-                      {["day", "week", "month", "year"].map((value) => (
+                      {["day", "week", "month"].map((value) => (
                         <button
                           key={value}
                           onClick={() => setPeriod(value)}
+                          aria-pressed={period === value}
                           className={`px-2.5 py-1 rounded-md text-xs font-medium capitalize ${period === value ? "bg-blue-600 text-white" : "text-gray-400 hover:text-gray-200"}`}
                         >
                           {value}
                         </button>
                       ))}
                     </div>
-                    <button className="hidden h-9 items-center gap-2 rounded-lg border border-[#1e2d40] bg-[#0d1a2d] px-3 text-xs text-gray-300 sm:flex">
-                      <CalendarDays className="h-3.5 w-3.5" />
-                      This Month
-                      <ChevronDown className="h-3.5 w-3.5 text-gray-500" />
-                    </button>
                   </div>
                 </div>
               </CardHeader>
               <CardContent>
-                {revenueLoading ? (
+                {revenueError ? <div className="ac-empty" role="alert"><p>Revenue data could not be loaded.</p><button onClick={() => refreshRevenue()}>Try again</button></div> : revenueLoading ? (
                   <Skeleton className="h-44 w-full" />
                 ) : chartData.length === 0 ? (
                   <p className="text-sm text-gray-500 py-8 text-center">
                     No revenue data available for this period.
                   </p>
                 ) : (
-                  <ResponsiveContainer width="100%" height={210}>
+                  chartData.length === 1 ? <ResponsiveContainer width="100%" height={220}><BarChart data={chartData} barSize={48} margin={{ top: 20, right: 15, left: 0, bottom: 0 }}><CartesianGrid vertical={false} stroke="var(--nv-border)" strokeDasharray="3 5" /><XAxis dataKey="label" tick={{ fontSize: 11, fill: 'var(--nv-muted)' }} axisLine={false} tickLine={false} /><YAxis tick={{ fontSize: 11, fill: 'var(--nv-muted)' }} axisLine={false} tickLine={false} /><Tooltip formatter={formatTooltipCurrency} contentStyle={{ background: 'var(--nv-raised)', border: '1px solid var(--nv-border)', borderRadius: 8 }} /><Bar dataKey="revenue" fill="#8493dd" radius={[6, 6, 0, 0]} /></BarChart></ResponsiveContainer> : <ResponsiveContainer width="100%" height={220}>
                     <AreaChart data={chartData}>
                       <defs>
                         <linearGradient id="accountingRevenue" x1="0" y1="0" x2="0" y2="1">
-                          <stop offset="5%" stopColor="#3b82f6" stopOpacity={0.35} />
-                          <stop offset="95%" stopColor="#3b82f6" stopOpacity={0.02} />
+                          <stop offset="5%" stopColor="#8493dd" stopOpacity={0.25} />
+                          <stop offset="95%" stopColor="#8493dd" stopOpacity={0.01} />
                         </linearGradient>
                       </defs>
+                      <CartesianGrid vertical={false} stroke="var(--nv-border)" strokeDasharray="3 5" />
                       <XAxis
                         dataKey="label"
                         tick={{ fontSize: 10, fill: "#64748b" }}
@@ -609,7 +587,7 @@ export default function AccountingPage() {
                       <Area
                         type="monotone"
                         dataKey="revenue"
-                        stroke="#3b82f6"
+                        stroke="#8493dd"
                         fill="url(#accountingRevenue)"
                         strokeWidth={2}
                       />
@@ -620,16 +598,17 @@ export default function AccountingPage() {
             </Card>
 
             {/* Invoices */}
-            <Card className="flex min-h-0 flex-1 flex-col overflow-hidden">
+            <Card className="ac-invoices flex min-h-0 flex-col">
               <CardHeader className="shrink-0">
                 <div className="space-y-3">
                   <div className="flex items-center justify-between gap-3">
                     <CardTitle className="text-sm">Invoices</CardTitle>
                     <div className="flex items-center gap-2">
-                      <div className="relative hidden sm:block">
+                      <div className="ac-search relative">
                         <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-500" />
                         <Input
                           placeholder="Search invoices..."
+                          aria-label="Search invoices"
                           value={search}
                           onChange={(event) => {
                             setPage(1);
@@ -677,6 +656,7 @@ export default function AccountingPage() {
                     {["all", "paid", "pending", "overdue"].map((value) => (
                       <button
                         key={value}
+                        aria-pressed={statusFilter === value}
                         onClick={() => {
                           setPage(1);
                           setStatusFilter(value);
@@ -690,7 +670,7 @@ export default function AccountingPage() {
                 </div>
               </CardHeader>
               <CardContent className="flex min-h-0 flex-1 flex-col p-0">
-                {invoicesLoading ? (
+                {invoicesError ? <div className="ac-empty" role="alert"><p>Invoices could not be loaded.</p><button onClick={() => refreshInvoices()}>Try again</button></div> : invoicesLoading ? (
                   <div className="min-h-0 flex-1 space-y-3 overflow-y-auto p-4">
                     {Array.from({ length: 4 }).map((_, index) => (
                       <Skeleton key={index} className="h-16 w-full" />
@@ -790,9 +770,6 @@ export default function AccountingPage() {
                                 >
                                   <Send className="h-3.5 w-3.5" />
                                 </Button>
-                                <Button size="icon" variant="outline" className="h-8 w-8 rounded-lg" title="More actions">
-                                  <MoreHorizontal className="h-3.5 w-3.5" />
-                                </Button>
                               </div>
                             </td>
                           </tr>
@@ -840,18 +817,16 @@ export default function AccountingPage() {
           </div>
 
           {/* Right panel */}
-          <div className="flex min-h-0 flex-col gap-3 overflow-hidden">
+          <div className="ac-aside">
             <Card className="overflow-hidden border-[#173050] bg-[radial-gradient(circle_at_50%_18%,rgba(37,99,235,0.28),transparent_34%),linear-gradient(135deg,#071321,#0b1a2f)] shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]">
               <CardContent className="px-4 py-4">
                 <div className="mb-2 flex items-center justify-between">
                   <span className="text-sm font-semibold text-white">Kora Insights</span>
                   <Sparkles className="h-4 w-4 text-blue-400" />
                 </div>
-                <div className="mx-auto mb-4 flex h-28 w-28 items-center justify-center rounded-full bg-blue-600/10 shadow-[0_0_42px_rgba(37,99,235,0.45)]">
-                  <Image src="/kora.png" alt="Kora" width={112} height={112} className="h-28 w-28 object-contain" priority />
-                </div>
+                <p className="ac-panel-caption">A closer look at your recorded finances.</p>
                 <div className="space-y-2">
-                  {koraInsights.slice(0, 3).map((insight) => {
+                  {!dashboardError && !dashboardLoading && koraInsights.slice(0, 3).map((insight) => {
                     const InsightIcon = insight.icon;
                     return (
                       <div
@@ -873,7 +848,7 @@ export default function AccountingPage() {
                   type="button"
                   variant="outline"
                   className="mt-4 h-9 w-full border-blue-500/50 bg-blue-600/20 text-xs text-blue-100 hover:bg-blue-600/30"
-                  onClick={() => toast.info("Kora financial assistant is ready.")}
+                  onClick={() => askKora('Help me review my recorded revenue and outstanding invoices. Suggest next steps without executing financial actions.')}
                 >
                   <Sparkles className="mr-2 h-3.5 w-3.5" />
                   Ask Kora anything...

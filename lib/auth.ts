@@ -15,8 +15,13 @@ function mapAuthErrorCode(message?: string) {
       return "user_not_found";
     case "Wrong password":
       return "wrong_password";
+    case "Valid fresh second factor required":
+    case "Second factor already used":
+      return "mfa_required";
     case "Email not verified":
       return "email_not_verified";
+    case "Account is blocked":
+      return "account_blocked";
     default:
       return "invalid_credentials";
   }
@@ -29,6 +34,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
       credentials: {
         email: { label: "Email", type: "email" },
         password: { label: "Password", type: "password" },
+        mfaCode: { label: "Authenticator code", type: "text" },
       },
       async authorize(credentials) {
         const email = String(credentials?.email ?? "").trim();
@@ -44,7 +50,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
             {
               method: "POST",
               headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ email, password }),
+              body: JSON.stringify({ email, password, mfaCode: String(credentials?.mfaCode ?? "") }),
             }
           );
 

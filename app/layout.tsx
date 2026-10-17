@@ -3,8 +3,8 @@ import "./globals.css";
 import { Providers } from "@/components/providers";
 
 export const metadata: Metadata = {
-  title: "KoraAI - Business Dashboard",
-  description: "KoraAI Business Owner Dashboard",
+  title: "NOVYA — Business Owner",
+  description: "Your NOVYA business owner dashboard",
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

@@ -5,9 +5,11 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useSession } from "next-auth/react";
-import { useRouter } from "next/navigation";
-import { emailProviderApi, employeesApi, inboxApi, mailApi } from "@/lib/api";
+import { useRouter, useSearchParams } from "next/navigation";
+import { employeesApi, inboxApi } from "@/lib/api";
 import { useInboxSocket } from "@/lib/socket";
+import { apiError } from "@/lib/owner-overview";
+import { OwnerEmailWorkspace } from "@/components/owner/inbox-email";
 import { Header } from "@/components/layout/header";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -31,7 +33,7 @@ import {
   Edit,
   File,
   FileText,
-  Image,
+  Image as ImageIcon,
   Mail,
   MessageSquare,
   MoreVertical,
@@ -68,15 +70,6 @@ type PinItem = {
   authorName?: string;
 };
 
-type EmployeeNote = {
-  id: string;
-  employeeIds: string[];
-  body: string;
-  createdAt: string;
-  authorName: string;
-  contactName?: string;
-};
-
 type FilterTab = "all" | "unread" | "groups";
 
 const EMOJI_CATEGORIES = [
@@ -110,16 +103,6 @@ const EMOJI_CATEGORIES = [
   },
 ];
 
-const EMOJI_CATEGORY_ICONS: Record<string, string> = {
-  smileys: "😊",
-  animals: "🐶",
-  food: "🍕",
-  activities: "⚽",
-  travel: "✈️",
-  objects: "💡",
-  symbols: "❤️",
-};
-
 const getOtherParticipant = (conversation: any, currentUserId?: string) => {
   if (!conversation) return null;
   return (conversation.participants || []).find(
@@ -145,22 +128,6 @@ const formatLastTime = (value?: string | Date | null) => {
     return formatTime(date);
   }
   return formatDate(date);
-};
-
-const parseEmailIdentity = (value?: string) => {
-  const raw = String(value || "").trim();
-  const match = raw.match(/^(.*?)\s*<([^>]+)>$/);
-  if (!match) {
-    return {
-      name: raw.includes("@") ? "" : raw,
-      email: raw.includes("@") ? raw : "",
-    };
-  }
-
-  return {
-    name: match[1].replace(/^"|"$/g, "").trim(),
-    email: match[2].trim(),
-  };
 };
 
 const getFileLabel = (message: any) => {
@@ -198,40 +165,30 @@ const isVideoFile = (message: any) => {
   return ["mp4", "mov", "avi", "webm", "mkv"].includes(ext);
 };;
 
-const readEmployeeNoteIds = (recipient: any) =>
-  Array.from(
-    new Set(
-      [
-        recipient?.employee?._id,
-        recipient?.employeeId?._id,
-        recipient?.employeeId,
-        recipient?._id,
-      ]
-        .filter(Boolean)
-        .map((value) => String(value)),
-    ),
-  );
-
 function usePersistentState<T>(key: string, fallback: T) {
-  const [state, setState] = useState<T>(fallback);
+  const [entry, setEntry] = useState<{ key: string; value: T } | null>(null);
+  const [initialFallback] = useState(fallback);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
     try {
       const raw = window.localStorage.getItem(key);
-      if (raw) {
-        setState(JSON.parse(raw));
-      }
+      const parsed = raw ? JSON.parse(raw) : initialFallback;
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- Synchronize account-scoped browser storage after hydration.
+      setEntry({ key, value: Array.isArray(initialFallback) && !Array.isArray(parsed) ? initialFallback : parsed });
     } catch {
-      window.localStorage.removeItem(key);
+      setEntry({ key, value: initialFallback });
     }
-  }, [key]);
+  }, [key, initialFallback]);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
-    window.localStorage.setItem(key, JSON.stringify(state));
-  }, [key, state]);
+    if (entry?.key !== key) return;
+    try { window.localStorage.setItem(key, JSON.stringify(entry.value)); } catch { /* Personal browser storage can be unavailable. */ }
+  }, [key, entry]);
 
+  const state = entry?.key === key ? entry.value : initialFallback;
+  const setState: React.Dispatch<React.SetStateAction<T>> = value => setEntry(current => ({ key, value: typeof value === 'function' ? (value as (previous: T) => T)(current?.key === key ? current.value : initialFallback) : value }));
   return [state, setState] as const;
 }
 
@@ -246,21 +203,17 @@ export function InboxWorkspace({
   const queryClient = useQueryClient();
   const { data: session } = useSession();
   const currentUserId = (session?.user as any)?._id;
+  const params = useSearchParams(), recipientParam = params.get('recipient');
+  const deepRecipient = useQuery({ queryKey: ['inbox-recipient-link', currentUserId, recipientParam], queryFn: () => inboxApi.getRecipients({ recipientId: recipientParam! }).then(response => asArray(response.data.data)[0] || null), enabled: Boolean(recipientParam && /^[a-f\d]{24}$/i.test(recipientParam)) });
 
   const [activeTab, setActiveTab] = useState<"chat" | "email">("chat");
   const [filterTab, setFilterTab] = useState<FilterTab>("all");
-  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [selectedIdState, setSelectedId] = useState<string | null>(null);
   const [search, setSearch] = useState("");
   const [draft, setDraft] = useState("");
   const [composerOpen, setComposerOpen] = useState(false);
-  const [mobileView, setMobileView] = useState<"list" | "chat">("list");
-  const [emailFolder, setEmailFolder] = useState<"inbox" | "sent">("inbox");
-  const [selectedMailId, setSelectedMailId] = useState<string | null>(null);
-  const [mailDialogOpen, setMailDialogOpen] = useState(false);
-  const [mailTo, setMailTo] = useState("");
-  const [mailSubject, setMailSubject] = useState("");
-  const [mailBody, setMailBody] = useState("");
-  const [mailAttachment, setMailAttachment] = useState<File | null>(null);
+  const [mobileView, setMobileView] = useState<"list" | "chat">(recipientParam ? 'chat' : 'list');
+  const [emailComposeRequest, setEmailComposeRequest] = useState(0);
   const [chatAttachment, setChatAttachment] = useState<File | null>(null);
   const [emojiOpen, setEmojiOpen] = useState(false);
   const [attachOpen, setAttachOpen] = useState(false);
@@ -276,18 +229,16 @@ export function InboxWorkspace({
   const [deleteChatConfirmOpen, setDeleteChatConfirmOpen] = useState(false);
 
   const [pinnedItems, setPinnedItems] = usePersistentState<PinItem[]>(
-    `${dashboardKey}:inbox:pinned`,
+    `${dashboardKey}:${currentUserId || 'signed-out'}:inbox:pinned`,
     []
   );
 
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
   const messageRefs = useRef<Record<string, HTMLDivElement | null>>({});
   const searchInputRef = useRef<HTMLInputElement | null>(null);
-  const attachmentInputRef = useRef<HTMLInputElement | null>(null);
-  const imageInputRef = useRef<HTMLInputElement | null>(null);
   const chatFileInputRef = useRef<HTMLInputElement | null>(null);
 
-  const { data: conversationsResponse, isLoading: conversationsLoading } = useQuery({
+  const { data: conversationsResponse, isLoading: conversationsLoading, error: conversationsError, refetch: refetchConversations } = useQuery({
     queryKey: ["inbox-conversations"],
     queryFn: () => inboxApi.getChats().then((response) => response.data),
     enabled: activeTab === "chat",
@@ -310,14 +261,10 @@ export function InboxWorkspace({
     });
   }, [conversations, currentUserId, search, filterTab]);
 
-  useEffect(() => {
-    if (activeTab !== "chat") return;
-    if (!selectedId && filteredConversations.length > 0) {
-      setSelectedId(String(filteredConversations[0]._id));
-    }
-  }, [activeTab, filteredConversations, selectedId]);
+  const linkedConversation = recipientParam && deepRecipient.data ? conversations.find(conversation => !conversation.isGroup && conversation.participants?.some((person: any) => String(person._id) === recipientParam)) : null;
+  const selectedId = selectedIdState || (deepRecipient.data ? String(linkedConversation?._id || `pending-${recipientParam}`) : activeTab === 'chat' && filteredConversations[0] ? String(filteredConversations[0]._id) : null);
 
-  const { data: threadResponse, isLoading: threadLoading } = useQuery({
+  const { data: threadResponse, isLoading: threadLoading, error: threadError, refetch: refetchThread } = useQuery({
     queryKey: ["inbox-conversation", selectedId],
     enabled: activeTab === "chat" && Boolean(selectedId) && !String(selectedId).startsWith("pending-"),
     queryFn: () =>
@@ -340,119 +287,25 @@ export function InboxWorkspace({
         );
       });
       if (existing) return existing;
+      if (deepRecipient.data && peerId === recipientParam) return { _id: selectedId, participants: [{ _id: currentUserId, name: session?.user?.name }, deepRecipient.data], isGroup: false, __pending: true, messages: [] };
     }
 
     return thread && String(thread._id) === String(selectedId) ? thread : null;
-  }, [conversations, selectedId, thread]);
+  }, [conversations, selectedId, thread, deepRecipient.data, recipientParam, currentUserId, session?.user?.name]);
   const messages: any[] = asArray(thread?.messages || (selectedConversation as any)?.messages);
-  const recipient = getOtherParticipant(selectedConversation, currentUserId);
-
-  const { data: mailsResponse, isLoading: mailsLoading } = useQuery({
-    queryKey: ["mail-list", emailFolder],
-    enabled: activeTab === "email",
-    queryFn: () =>
-      mailApi.getAll({ type: emailFolder, limit: 25 }).then((response) => response.data),
-  });
-
-  const { data: gmailStatusResponse, isLoading: gmailStatusLoading } = useQuery({
-    queryKey: ["gmail-status"],
-    enabled: activeTab === "email",
-    queryFn: () => emailProviderApi.getGmailStatus().then((response) => response.data),
-    retry: false,
-  });
-
-  const gmailStatus = gmailStatusResponse?.data;
-  const gmailConnected = Boolean(gmailStatus?.connected);
-
-  const { data: gmailInboxResponse, isLoading: gmailInboxLoading } = useQuery({
-    queryKey: ["gmail-inbox"],
-    enabled: activeTab === "email" && emailFolder === "inbox" && gmailConnected,
-    queryFn: () =>
-      emailProviderApi
-        .getGmailInbox({ maxResults: 25 })
-        .then((response) => response.data),
-    retry: false,
-  });
-
-  const localMails: any[] = asArray(mailsResponse?.data?.mails);
-  const gmailMails = useMemo(
-    () =>
-      asArray(gmailInboxResponse?.data?.messages).map((message: any) => {
-        const from = parseEmailIdentity(message.from);
-
-        return {
-          _id: `gmail-${message.id}`,
-          provider: "gmail",
-          providerMessageId: message.id,
-          threadId: message.threadId,
-          from,
-          toEmails: gmailStatus?.email ? [gmailStatus.email] : [],
-          subject: message.subject || "(No subject)",
-          body: message.snippet || "",
-          snippet: message.snippet || "",
-          createdAt: message.date,
-          attachments: [],
-        };
-      }),
-    [gmailInboxResponse?.data?.messages, gmailStatus?.email],
-  );
-  const mails: any[] = emailFolder === "inbox" ? [...gmailMails, ...localMails] : localMails;
-  const selectedMailBase = mails.find((mail) => String(mail._id) === String(selectedMailId)) || mails[0] || null;
-  const selectedGmailMessageId =
-    selectedMailBase?.provider === "gmail" ? selectedMailBase.providerMessageId : "";
-
-  const { data: gmailMessageResponse, isLoading: gmailMessageLoading } = useQuery({
-    queryKey: ["gmail-message", selectedGmailMessageId],
-    enabled: activeTab === "email" && Boolean(selectedGmailMessageId),
-    queryFn: () =>
-      emailProviderApi
-        .getGmailMessage(String(selectedGmailMessageId))
-        .then((response) => response.data),
-    retry: false,
-  });
-
-  const selectedMail = useMemo(() => {
-    if (!selectedMailBase) return null;
-    const details = gmailMessageResponse?.data;
-    if (selectedMailBase.provider !== "gmail" || !details) return selectedMailBase;
-
-    return {
-      ...selectedMailBase,
-      subject: details.subject || selectedMailBase.subject,
-      from: parseEmailIdentity(details.from),
-      toEmails: details.to ? [details.to] : selectedMailBase.toEmails,
-      body: details.body || selectedMailBase.body,
-      bodyHtml: details.bodyHtml || "",
-      attachments: details.attachments || [],
-      createdAt: details.date || selectedMailBase.createdAt,
-    };
-  }, [gmailMessageResponse?.data, selectedMailBase]);
-  const emailListLoading = mailsLoading || gmailStatusLoading || gmailInboxLoading;
-
-  useEffect(() => {
-    if (activeTab !== "email") return;
-    if (selectedMail && String(selectedMailId) !== String(selectedMail._id)) {
-      setSelectedMailId(String(selectedMail._id));
-    }
-  }, [activeTab, selectedMail, selectedMailId]);
-
-  useEffect(() => {
-    if (recipient?.email) {
-      setMailTo(recipient.email);
-    }
-  }, [recipient?.email]);
+  const recipient = selectedConversation?.isGroup ? null : getOtherParticipant(selectedConversation, currentUserId);
 
   const sendMutation = useMutation({
     mutationFn: () => {
       if (chatAttachment) {
         const payload = new FormData();
-        payload.append("recipientId", String(recipient?._id));
+        payload.append(selectedConversation?.isGroup ? "conversationId" : "recipientId", String(selectedConversation?.isGroup ? selectedId : recipient?._id));
         payload.append("content", draft.trim());
         payload.append("file", chatAttachment);
         return inboxApi.sendMessage(payload);
       }
       return inboxApi.sendMessage({
-        recipientId: String(recipient?._id),
+        ...(selectedConversation?.isGroup ? { conversationId: String(selectedId) } : { recipientId: String(recipient?._id) }),
         content: draft.trim(),
       });
     },
@@ -537,43 +390,6 @@ export function InboxWorkspace({
     onError: (error: any) => toast.error(error?.response?.data?.message || "Failed to delete conversation"),
   });
 
-  const sendMailMutation = useMutation({
-    mutationFn: () => {
-      const payload = new FormData();
-      payload.append("to", mailTo.trim());
-      payload.append("subject", mailSubject.trim());
-      payload.append("body", mailBody.trim());
-      if (mailAttachment) {
-        payload.append("attachments", mailAttachment);
-      }
-      return mailApi.create(payload);
-    },
-    onSuccess: () => {
-      toast.success("Email sent");
-      setMailDialogOpen(false);
-      setMailSubject("");
-      setMailBody("");
-      setMailAttachment(null);
-      queryClient.invalidateQueries({ queryKey: ["mail-list"] });
-    },
-    onError: (error: any) =>
-      toast.error(error?.response?.data?.message || "Failed to send email"),
-  });
-
-  const connectGmailMutation = useMutation({
-    mutationFn: () => emailProviderApi.initGmail().then((response) => response.data),
-    onSuccess: (response) => {
-      const authUrl = response?.data?.authUrl;
-      if (authUrl && typeof window !== "undefined") {
-        window.location.href = authUrl;
-        return;
-      }
-      toast.error("Gmail connection URL was not returned");
-    },
-    onError: (error: any) =>
-      toast.error(error?.response?.data?.message || "Failed to start Gmail connection"),
-  });
-
   useEffect(() => {
     if (!selectedId || !thread || String(selectedId).startsWith("pending-")) return;
     const unread = asArray(thread.messages).some(
@@ -630,7 +446,7 @@ export function InboxWorkspace({
   });
 
   const canSend =
-    Boolean(recipient?._id) &&
+    Boolean(recipient?._id || selectedConversation?.isGroup) &&
     (draft.trim().length > 0 || Boolean(chatAttachment)) &&
     !sendMutation.isPending;
 
@@ -687,6 +503,7 @@ export function InboxWorkspace({
   const handleStartConversation = (peer: any) => {
     setComposerOpen(false);
     setActiveTab("chat");
+    setMobileView("chat");
     const existing = conversations.find((conversation) => {
       if (conversation.isGroup) return false;
       return (conversation.participants || []).some(
@@ -784,37 +601,9 @@ export function InboxWorkspace({
       ...current,
     ]);
 
-    const employeeIds = readEmployeeNoteIds(recipient);
-    if (employeeIds.length > 0 && typeof window !== "undefined") {
-      const key = `${dashboardKey}:employee-notes`;
-      let savedNotes: EmployeeNote[] = [];
-      try {
-        savedNotes = JSON.parse(window.localStorage.getItem(key) || "[]");
-      } catch {
-        savedNotes = [];
-      }
-      window.localStorage.setItem(
-        key,
-        JSON.stringify([
-          {
-            id: noteId,
-            employeeIds,
-            body,
-            createdAt,
-            authorName: "You",
-            contactName: recipient?.name,
-          },
-          ...savedNotes,
-        ]),
-      );
-    }
-
     setNoteDraft("");
     setNoteDialogOpen(false);
-    toast.success("Note saved");
-    if (employeeIds[0]) {
-      router.push(`/employees?employee=${encodeURIComponent(employeeIds[0])}&tab=notes`);
-    }
+    toast.success("Personal note saved in this browser");
   };
 
   const startMeeting = () => {
@@ -845,9 +634,9 @@ export function InboxWorkspace({
   };
 
   const renderContactPanel = () => (
-    <div className="hidden w-72 shrink-0 flex-col space-y-3 overflow-y-auto bg-[#0a1628] p-4 xl:flex">
+    <div className="ni-contact-panel hidden w-72 shrink-0 flex-col space-y-3 overflow-y-auto bg-[#0a1628] p-4 xl:flex">
       <h3 className="text-sm font-semibold text-gray-200">Contact Details</h3>
-      {recipient ? (
+      {selectedConversation?.isGroup ? <div className="ni-group-participants"><h4>{selectedConversation.groupName}</h4><p>{selectedConversation.participants?.length || 0} participants</p>{selectedConversation.participants?.map((person: any) => <div key={person._id}><span>{getInitials(person.name || 'Team')}</span><strong>{person.name || 'Team member'}</strong><small>{person.role?.replaceAll('_', ' ')}</small></div>)}</div> : recipient ? (
         <>
           <div className="rounded-2xl border border-[#1e2d40] bg-[#0b1422] p-4">
             <div className="flex items-center gap-3 mb-4">
@@ -859,11 +648,11 @@ export function InboxWorkspace({
                     <AvatarFallback className="text-sm">{getInitials(recipient.name || "U")}</AvatarFallback>
                   )}
                 </Avatar>
-                <span className="absolute bottom-0.5 right-0.5 h-3 w-3 rounded-full border-2 border-[#0b1422] bg-green-400" />
+
               </div>
               <div>
                 <p className="font-semibold text-gray-100 text-sm">{recipient.name}</p>
-                <p className="text-xs text-green-400">Online</p>
+                <p className="text-xs text-gray-500">Team contact</p>
                 <p className="text-xs text-gray-400">{recipient.role?.replace(/_/g, " ")}</p>
               </div>
             </div>
@@ -927,7 +716,7 @@ export function InboxWorkspace({
 
           <div className="rounded-2xl border border-[#1e2d40] bg-[#0b1422] p-4">
             <div className="mb-3 flex items-center justify-between">
-              <h4 className="text-sm font-semibold text-gray-100">Pinned Messages</h4>
+              <h4 className="text-sm font-semibold text-gray-100">Personal Pins & Notes</h4>
               <button
                 type="button"
                 onClick={() => setPinnedDialogOpen(true)}
@@ -937,6 +726,7 @@ export function InboxWorkspace({
               </button>
             </div>
             <div className="space-y-3">
+              <p className="ni-personal-note">Private to your account in this browser. Pins and notes are not shared with your team.</p>
               {pinnedForConversation.length === 0 ? (
                 <p className="text-xs text-gray-500">No pinned items yet.</p>
               ) : (
@@ -978,11 +768,12 @@ export function InboxWorkspace({
   );
 
   return (
-    <div>
-      <Header title="Inbox" subtitle={subtitle} />
+    <div className="ni-page">
+      <Header title={activeTab === "chat" ? "Inbox" : "Email"} />
 
       {/* Tabs row — inside content, below header */}
-      <div className="flex items-center justify-end gap-2 border-b border-[#1e2d40] bg-[#070f1c] px-4 py-2 sm:px-6">
+      <div className="ni-heading flex items-center justify-end gap-2 border-b border-[#1e2d40] bg-[#070f1c] px-4 py-2 sm:px-6">
+        <div className="ni-heading-copy"><h1>{activeTab === "chat" ? "Inbox" : "Email"}</h1><p>{activeTab === "chat" ? subtitle : "Your business mailbox, organized in one place."}</p></div>
         <div className="flex items-center rounded-xl border border-[#1e2d40] bg-[#0a1628] p-1 gap-1">
           <button
             type="button"
@@ -992,7 +783,7 @@ export function InboxWorkspace({
             }`}
           >
             <MessageSquare className="h-3.5 w-3.5" />
-            Chats
+            Inbox
           </button>
           <button
             type="button"
@@ -1005,21 +796,22 @@ export function InboxWorkspace({
             Email
           </button>
         </div>
-        <Button size="sm" onClick={() => (activeTab === "chat" ? setComposerOpen(true) : setMailDialogOpen(true))}>
+        <Button size="sm" onClick={() => (activeTab === "chat" ? setComposerOpen(true) : setEmailComposeRequest(current => current + 1))}>
           <Plus className="mr-1 h-3.5 w-3.5" />
           {activeTab === "chat" ? "New Conversation" : "Compose Email"}
         </Button>
       </div>
 
-      <div className="p-3 sm:p-4 lg:p-6">
+      <div className="ni-body p-3 sm:p-4 lg:p-6">
+        {recipientParam && (deepRecipient.isError || (deepRecipient.isSuccess && !deepRecipient.data)) && <div className="ni-query-error" role="alert">{deepRecipient.isError ? apiError(deepRecipient.error) : 'This recipient is unavailable for messaging.'}</div>}
         {activeTab === "chat" ? (
           <div
-            className="flex overflow-hidden rounded-xl border border-[#1e2d40]"
-            style={{ height: "calc(100vh - 200px)", minHeight: 520 }}
+            className="ni-chat-layout flex overflow-hidden rounded-xl border border-[#1e2d40]"
+            style={{ height: "calc(100dvh - 210px)", minHeight: 560 }}
           >
             {/* Conversations List */}
             <div
-              className={`${mobileView === "list" ? "flex" : "hidden"} w-72 shrink-0 flex-col border-r border-[#1e2d40] bg-[#0a1628] lg:flex`}
+              className={`ni-conversations ${mobileView === "list" ? "flex" : "hidden"} w-72 shrink-0 flex-col border-r border-[#1e2d40] bg-[#0a1628] lg:flex`}
             >
               <div className="border-b border-[#1e2d40] p-4">
                 <div className="mb-3 flex items-center justify-between">
@@ -1060,7 +852,7 @@ export function InboxWorkspace({
                 </div>
               </div>
               <div className="flex-1 overflow-y-auto">
-                {conversationsLoading ? (
+                {conversationsError ? <div className="ni-query-error" role="alert">{apiError(conversationsError)}<button type="button" onClick={() => refetchConversations()}>Retry</button></div> : conversationsLoading ? (
                   <div className="space-y-3 p-3">
                     {Array.from({ length: 5 }).map((_, index) => (
                       <Skeleton key={index} className="h-14 w-full" />
@@ -1084,7 +876,7 @@ export function InboxWorkspace({
                           setMobileView("chat");
                         }}
                         className={`flex w-full items-center gap-3 border-b border-[#1e2d40] px-4 py-3 text-left transition-colors ${
-                          isSelected ? "bg-blue-600/10" : "hover:bg-[#0d1a2d]"
+                          isSelected ? "ni-selected bg-blue-600/10" : "hover:bg-[#0d1a2d]"
                         }`}
                       >
                         <div className="relative shrink-0">
@@ -1125,7 +917,7 @@ export function InboxWorkspace({
 
             {/* Chat View */}
             <div
-              className={`${mobileView === "chat" ? "flex" : "hidden"} min-w-0 flex-1 flex-col border-r border-[#1e2d40] bg-[#070f1c] lg:flex`}
+              className={`ni-thread ${mobileView === "chat" ? "flex" : "hidden"} min-w-0 flex-1 flex-col border-r border-[#1e2d40] bg-[#070f1c] lg:flex`}
             >
               <div className="flex items-center justify-between border-b border-[#1e2d40] px-4 py-3">
                 {selectedConversation ? (
@@ -1149,13 +941,13 @@ export function InboxWorkspace({
                             </AvatarFallback>
                           )}
                         </Avatar>
-                        <span className="absolute bottom-0 right-0 h-2.5 w-2.5 rounded-full border-2 border-[#070f1c] bg-green-400" />
+
                       </div>
                       <div>
                         <p className="text-sm font-medium text-gray-200">
                           {getConversationName(selectedConversation, currentUserId)}
                         </p>
-                        <p className="text-[10px] text-green-400">Online</p>
+                        <p className="text-[10px] text-gray-500">{selectedConversation.isGroup ? `${selectedConversation.participants?.length || 0} participants` : "Team conversation"}</p>
                       </div>
                     </div>
                     <div className="flex items-center gap-2">
@@ -1192,7 +984,7 @@ export function InboxWorkspace({
               </div>
 
               <div className="flex-1 space-y-1 overflow-y-auto px-5 py-4">
-                {!selectedConversation ? (
+                {threadError ? <div className="ni-query-error" role="alert">{apiError(threadError)}<button type="button" onClick={() => refetchThread()}>Retry</button></div> : !selectedConversation ? (
                   <p className="text-center text-xs text-gray-500 mt-10">
                     Pick a conversation or start a new one.
                   </p>
@@ -1229,6 +1021,7 @@ export function InboxWorkspace({
 
                     const message = item.data;
                     const messageId = String(message._id);
+                    const messageAuthor = selectedConversation?.participants?.find((person: any) => String(person._id) === String(message.sender_id)) || message.sender || recipient;
                     const isMe = String(message.sender_id) === String(currentUserId);
                     const isPinned = pinnedForConversation.some((pin) => pin.id === messageId);
                     const isEditing = editingMessageId === messageId;
@@ -1247,16 +1040,17 @@ export function InboxWorkspace({
                       >
                         {!isMe ? (
                           <Avatar className="h-7 w-7 shrink-0 mb-1">
-                            {recipient?.profileImage?.url ? (
-                              <AvatarImage src={recipient.profileImage.url} alt="" />
+                            {messageAuthor?.profileImage?.url ? (
+                              <AvatarImage src={messageAuthor.profileImage.url} alt="" />
                             ) : (
                               <AvatarFallback className="text-[9px]">
-                                {getInitials(recipient?.name || "")}
+                                {getInitials(messageAuthor?.name || "")}
                               </AvatarFallback>
                             )}
                           </Avatar>
                         ) : null}
                         <div className="relative max-w-[72%]">
+                          {selectedConversation?.isGroup && !isMe && <p className="ni-message-author">{messageAuthor?.name || 'Team member'}</p>}
                           {/* Hover "..." actions button */}
                           <div className={`absolute -top-3 ${isMe ? "right-0" : "left-0"} z-20`}>
                             <div className="relative hidden group-hover:block">
@@ -1350,6 +1144,7 @@ export function InboxWorkspace({
                               {message.fileUrl ? (
                                 isImageFile(message) ? (
                                   <div className="group/img relative mt-2">
+                                    {/* eslint-disable-next-line @next/next/no-img-element -- Chat attachments are arbitrary provider URLs. */}
                                     <img
                                       src={message.fileUrl}
                                       alt={getFileLabel(message)}
@@ -1437,7 +1232,7 @@ export function InboxWorkspace({
                   <div className="mb-3 flex items-center justify-between rounded-xl border border-[#1e2d40] bg-[#0a1628] px-3 py-2 text-xs text-gray-300">
                     <div className="flex items-center gap-2 min-w-0">
                       {chatAttachment.type.startsWith("image/") ? (
-                        <Image className="h-3.5 w-3.5 shrink-0 text-green-400" />
+                        <ImageIcon className="h-3.5 w-3.5 shrink-0 text-green-400" />
                       ) : chatAttachment.type.startsWith("video/") ? (
                         <Video className="h-3.5 w-3.5 shrink-0 text-purple-400" />
                       ) : chatAttachment.type.startsWith("audio/") ? (
@@ -1561,7 +1356,7 @@ export function InboxWorkspace({
                   </div>
 
                   <Input
-                    placeholder={recipient ? "Type a message..." : "Select a conversation first"}
+                    placeholder={selectedConversation ? "Type a message..." : "Select a conversation first"}
                     value={draft}
                     onChange={(event) => setDraft(event.target.value)}
                     onKeyDown={(event) => {
@@ -1570,7 +1365,7 @@ export function InboxWorkspace({
                         sendMutation.mutate();
                       }
                     }}
-                    disabled={!recipient}
+                    disabled={!selectedConversation || Boolean(threadError)}
                     className="flex-1 bg-[#0d1a2d] border-[#1e2d40] text-sm placeholder:text-gray-500"
                   />
                   <Button
@@ -1588,215 +1383,28 @@ export function InboxWorkspace({
             {/* Contact Details Panel */}
             {renderContactPanel()}
           </div>
-        ) : (
-          <div
-            className="flex overflow-hidden rounded-xl border border-[#1e2d40]"
-            style={{ height: "calc(100vh - 200px)", minHeight: 520 }}
-          >
-            <div className="flex w-72 shrink-0 flex-col border-r border-[#1e2d40] bg-[#0a1628]">
-              <div className="border-b border-[#1e2d40] p-4">
-                <div className="mb-3 flex items-center justify-between">
-                  <h3 className="text-sm font-semibold text-gray-200">Email</h3>
-                  <Button size="sm" onClick={() => setMailDialogOpen(true)}>
-                    <Plus className="mr-1 h-3.5 w-3.5" />
-                    Compose
-                  </Button>
-                </div>
-                <div className="flex gap-1">
-                  <button
-                    type="button"
-                    onClick={() => setEmailFolder("inbox")}
-                    className={`flex-1 rounded-lg py-1.5 text-xs font-medium transition-colors ${
-                      emailFolder === "inbox" ? "bg-blue-600 text-white" : "text-gray-400 hover:text-gray-200"
-                    }`}
-                  >
-                    Inbox
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setEmailFolder("sent")}
-                    className={`flex-1 rounded-lg py-1.5 text-xs font-medium transition-colors ${
-                      emailFolder === "sent" ? "bg-blue-600 text-white" : "text-gray-400 hover:text-gray-200"
-                    }`}
-                  >
-                    Sent
-                  </button>
-                </div>
-              </div>
-              <div className="flex-1 overflow-y-auto">
-                {emailListLoading ? (
-                  <div className="space-y-3 p-3">
-                    {Array.from({ length: 5 }).map((_, index) => (
-                      <Skeleton key={index} className="h-16 w-full" />
-                    ))}
-                  </div>
-                ) : mails.length === 0 ? (
-                  <div className="space-y-3 p-6 text-center text-xs text-gray-500">
-                    {emailFolder === "inbox" && !gmailConnected ? (
-                      <>
-                        <p>Connect Gmail to show inbox emails here.</p>
-                        <Button
-                          size="sm"
-                          onClick={() => connectGmailMutation.mutate()}
-                          disabled={connectGmailMutation.isPending}
-                        >
-                          <Mail className="h-3.5 w-3.5" />
-                          {connectGmailMutation.isPending ? "Connecting..." : "Connect Gmail"}
-                        </Button>
-                      </>
-                    ) : (
-                      <p>No emails found.</p>
-                    )}
-                  </div>
-                ) : (
-                  mails.map((mail) => {
-                    const actor =
-                      emailFolder === "inbox"
-                        ? mail.from?.name || mail.from?.email
-                        : mail.to?.[0]?.name || mail.toEmails?.[0];
-                    return (
-                      <button
-                        key={mail._id}
-                        type="button"
-                        onClick={() => setSelectedMailId(String(mail._id))}
-                        className={`block w-full border-b border-[#1e2d40] px-4 py-3 text-left transition-colors ${
-                          String(selectedMail?._id) === String(mail._id)
-                            ? "bg-blue-600/10"
-                            : "hover:bg-[#0d1a2d]"
-                        }`}
-                      >
-                        <div className="flex items-center justify-between gap-2">
-                          <p className="truncate text-sm font-medium text-gray-100">{actor || "Email"}</p>
-                          <span className="text-[10px] text-gray-500">{formatLastTime(mail.createdAt)}</span>
-                        </div>
-                        <p className="truncate text-xs text-gray-400">{mail.subject || "(No subject)"}</p>
-                        <p className="truncate text-[11px] text-gray-500">{mail.snippet || mail.body || "No body"}</p>
-                      </button>
-                    );
-                  })
-                )}
-              </div>
-            </div>
-
-            <div className="flex min-w-0 flex-1 flex-col border-r border-[#1e2d40] bg-[#070f1c]">
-              <div className="border-b border-[#1e2d40] px-5 py-4">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <p className="text-sm font-semibold text-gray-100">
-                      {selectedMail?.subject || "Select an email"}
-                    </p>
-                    <p className="text-xs text-gray-500">
-                      {selectedMail
-                        ? `From ${selectedMail.from?.name || selectedMail.from?.email || "Unknown"}`
-                        : "Email details will appear here."}
-                    </p>
-                  </div>
-                  {selectedMail ? (
-                    <Button size="sm" variant="outline" onClick={() => setMailDialogOpen(true)}>
-                      Reply
-                    </Button>
-                  ) : null}
-                </div>
-              </div>
-              <div className="flex-1 overflow-y-auto p-5">
-                {!selectedMail ? (
-                  <p className="text-sm text-gray-500">Pick an email from the list or compose a new one.</p>
-                ) : (
-                  <div className="space-y-5">
-                    <div className="rounded-2xl border border-[#1e2d40] bg-[#0a1628] p-4">
-                      <div className="mb-3 flex items-center justify-between">
-                        <div>
-                          <p className="text-sm font-medium text-gray-100">
-                            {selectedMail.from?.name || selectedMail.from?.email || "Unknown sender"}
-                          </p>
-                          <p className="text-xs text-gray-500">
-                            {selectedMail.toEmails?.join(", ") || recipient?.email || ""}
-                          </p>
-                        </div>
-                        {selectedMail.provider !== "gmail" ? (
-                          <button
-                            type="button"
-                            onClick={() =>
-                              mailApi.toggleStar(String(selectedMail._id)).then(() =>
-                                queryClient.invalidateQueries({ queryKey: ["mail-list"] })
-                              )
-                            }
-                            className="rounded-full border border-[#1e2d40] p-2 text-gray-300 hover:text-yellow-300"
-                          >
-                            <Pin className="h-4 w-4" />
-                          </button>
-                        ) : null}
-                      </div>
-                      <p className="whitespace-pre-wrap text-sm text-gray-200">
-                        {gmailMessageLoading ? "Loading email..." : selectedMail.body || "No message body."}
-                      </p>
-                    </div>
-                    <div className="rounded-2xl border border-[#1e2d40] bg-[#0a1628] p-4">
-                      <h4 className="mb-3 text-sm font-semibold text-gray-100">Attachments</h4>
-                      {selectedMail.attachments?.length ? (
-                        <div className="space-y-2">
-                          {selectedMail.attachments.map((file: any, index: number) => (
-                            <a
-                              key={`${selectedMail._id}-${index}`}
-                              href={file.url}
-                              target="_blank"
-                              rel="noreferrer"
-                              className="flex items-center gap-3 rounded-xl border border-[#1e2d40] px-3 py-2 hover:border-blue-500/60"
-                            >
-                              <Paperclip className="h-4 w-4 text-blue-300" />
-                              <span className="truncate text-sm text-gray-100">{file.fileName || "Attachment"}</span>
-                            </a>
-                          ))}
-                        </div>
-                      ) : (
-                        <p className="text-xs text-gray-500">No attachments.</p>
-                      )}
-                    </div>
-                  </div>
-                )}
-              </div>
-            </div>
-
-            {renderContactPanel()}
-          </div>
-        )}
+        ) : <OwnerEmailWorkspace composeRequest={emailComposeRequest} />}
       </div>
 
       <NewConversationDialog
         open={composerOpen}
         onOpenChange={setComposerOpen}
         onSelectPeer={handleStartConversation}
+        onSelectGroup={group => { queryClient.invalidateQueries({ queryKey: ['inbox-conversations'] }); queryClient.setQueryData(['inbox-conversation', String(group._id)], { data: group }); setSelectedId(String(group._id)); setComposerOpen(false); setMobileView('chat'); }}
         searchPlaceholder={recipientSearchPlaceholder}
-      />
-
-      <ComposeMailDialog
-        open={mailDialogOpen}
-        onOpenChange={setMailDialogOpen}
-        to={mailTo}
-        setTo={setMailTo}
-        subject={mailSubject}
-        setSubject={setMailSubject}
-        body={mailBody}
-        setBody={setMailBody}
-        attachment={mailAttachment}
-        setAttachment={setMailAttachment}
-        attachmentInputRef={attachmentInputRef}
-        imageInputRef={imageInputRef}
-        isSending={sendMailMutation.isPending}
-        onSend={() => sendMailMutation.mutate()}
       />
 
       <Dialog open={noteDialogOpen} onOpenChange={setNoteDialogOpen}>
         <DialogContent className="max-w-md">
           <DialogHeader>
-            <DialogTitle>Add Note</DialogTitle>
+            <DialogTitle>Add Personal Note</DialogTitle>
           </DialogHeader>
           <textarea
             value={noteDraft}
             onChange={(event) => setNoteDraft(event.target.value)}
             rows={5}
             className="w-full rounded-xl border border-[#1e2d40] bg-[#0a1628] px-3 py-2 text-sm text-gray-100 outline-none"
-            placeholder="Write a private note about this contact..."
+            placeholder="Write a personal note saved in this browser only..."
           />
           <div className="flex justify-end gap-2">
             <Button variant="outline" onClick={() => setNoteDialogOpen(false)}>Cancel</Button>
@@ -2096,16 +1704,20 @@ function NewConversationDialog({
   open,
   onOpenChange,
   onSelectPeer,
+  onSelectGroup,
   searchPlaceholder,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onSelectPeer: (peer: any) => void;
+  onSelectGroup: (group: any) => void;
   searchPlaceholder: string;
 }) {
   const [query, setQuery] = useState("");
+  const [groupMode, setGroupMode] = useState(false), [groupName, setGroupName] = useState(''), [participantIds, setParticipantIds] = useState<string[]>([]);
+  const group = useMutation({ mutationFn: () => inboxApi.createGroup({ groupName, participantIds }).then(response => response.data.data), onSuccess: onSelectGroup, onError: error => toast.error(apiError(error)) });
 
-  const { data: recipientsResponse, isLoading } = useQuery({
+  const { data: recipientsResponse, isLoading, error: recipientsError, refetch: retryRecipients } = useQuery({
     queryKey: ["inbox-recipients", query],
     queryFn: () =>
       inboxApi
@@ -2114,7 +1726,7 @@ function NewConversationDialog({
     enabled: open,
   });
 
-  const { data: employeesResponse, isLoading: employeesLoading } = useQuery({
+  const { data: employeesResponse, isLoading: employeesLoading, error: employeesError, refetch: retryEmployees } = useQuery({
     queryKey: ["inbox-employee-recipients"],
     queryFn: () => employeesApi.getAll({ limit: 100 }).then((response) => response.data),
     enabled: open,
@@ -2158,8 +1770,11 @@ function NewConversationDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-md">
         <DialogHeader>
-          <DialogTitle>Start a conversation</DialogTitle>
+          <DialogTitle>{groupMode ? 'Create a group conversation' : 'Start a conversation'}</DialogTitle>
         </DialogHeader>
+        <div className="ni-new-chat-tabs"><button type="button" className={!groupMode ? 'selected' : ''} onClick={() => setGroupMode(false)}>Direct message</button><button type="button" className={groupMode ? 'selected' : ''} onClick={() => setGroupMode(true)}>New group</button></div>
+        {groupMode && <Input aria-label="Group name" value={groupName} onChange={event => setGroupName(event.target.value)} placeholder="Group name" maxLength={50} />}
+        {(recipientsError || employeesError) && <div className="ni-query-error" role="alert">{apiError(recipientsError || employeesError)}<button type="button" onClick={() => { retryRecipients(); retryEmployees(); }}>Retry</button></div>}
         <div className="relative">
           <Search className="absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-gray-500" />
           <Input
@@ -2180,9 +1795,10 @@ function NewConversationDialog({
             recipients.map((person) => (
               <button
                 key={person._id}
-                onClick={() => onSelectPeer(person)}
+                onClick={() => groupMode ? setParticipantIds(current => current.includes(String(person._id)) ? current.filter(id => id !== String(person._id)) : [...current, String(person._id)]) : onSelectPeer(person)}
                 className="flex w-full items-center gap-3 rounded-lg p-2 text-left transition-colors hover:bg-[#1e2d40]"
               >
+                {groupMode && <input type="checkbox" checked={participantIds.includes(String(person._id))} readOnly aria-label={`Include ${person.name}`} />}
                 <Avatar className="h-8 w-8">
                   {person.profileImage?.url ? (
                     <AvatarImage src={person.profileImage.url} alt={person.name} />
@@ -2207,105 +1823,7 @@ function NewConversationDialog({
             ))
           )}
         </div>
-      </DialogContent>
-    </Dialog>
-  );
-}
-
-function ComposeMailDialog({
-  open,
-  onOpenChange,
-  to,
-  setTo,
-  subject,
-  setSubject,
-  body,
-  setBody,
-  attachment,
-  setAttachment,
-  attachmentInputRef,
-  imageInputRef,
-  isSending,
-  onSend,
-}: {
-  open: boolean;
-  onOpenChange: (open: boolean) => void;
-  to: string;
-  setTo: (value: string) => void;
-  subject: string;
-  setSubject: (value: string) => void;
-  body: string;
-  setBody: (value: string) => void;
-  attachment: File | null;
-  setAttachment: (file: File | null) => void;
-  attachmentInputRef: React.RefObject<HTMLInputElement | null>;
-  imageInputRef: React.RefObject<HTMLInputElement | null>;
-  isSending: boolean;
-  onSend: () => void;
-}) {
-  return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-2xl">
-        <DialogHeader>
-          <DialogTitle>Compose Email</DialogTitle>
-        </DialogHeader>
-        <div className="space-y-4">
-          <div className="grid gap-4 md:grid-cols-2">
-            <div>
-              <label className="mb-1 block text-xs text-gray-400">To</label>
-              <Input value={to} onChange={(event) => setTo(event.target.value)} placeholder="recipient@example.com" />
-            </div>
-            <div>
-              <label className="mb-1 block text-xs text-gray-400">Subject</label>
-              <Input value={subject} onChange={(event) => setSubject(event.target.value)} placeholder="Subject" />
-            </div>
-          </div>
-          <div>
-            <label className="mb-1 block text-xs text-gray-400">Message</label>
-            <textarea
-              value={body}
-              onChange={(event) => setBody(event.target.value)}
-              rows={8}
-              className="w-full rounded-xl border border-[#1e2d40] bg-[#0a1628] px-3 py-2 text-sm text-gray-100 outline-none"
-              placeholder="Write your email..."
-            />
-          </div>
-          <input
-            ref={attachmentInputRef}
-            type="file"
-            className="hidden"
-            onChange={(event) => setAttachment(event.target.files?.[0] || null)}
-          />
-          <input
-            ref={imageInputRef}
-            type="file"
-            accept="image/*"
-            className="hidden"
-            onChange={(event) => setAttachment(event.target.files?.[0] || null)}
-          />
-          <div className="flex items-center justify-between rounded-xl border border-[#1e2d40] bg-[#0a1628] px-3 py-2">
-            <div className="flex items-center gap-2">
-              <QuickIconButton icon={Paperclip} label="Attach file" onClick={() => attachmentInputRef.current?.click()} />
-              <QuickIconButton icon={Image} label="Attach image" onClick={() => imageInputRef.current?.click()} />
-            </div>
-            {attachment ? (
-              <div className="flex items-center gap-2 text-xs text-gray-300">
-                <span className="max-w-55 truncate">{attachment.name}</span>
-                <button type="button" onClick={() => setAttachment(null)}>
-                  <X className="h-4 w-4" />
-                </button>
-              </div>
-            ) : (
-              <span className="text-xs text-gray-500">No attachment selected</span>
-            )}
-          </div>
-          <div className="flex justify-end gap-2">
-            <Button variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button>
-            <Button onClick={onSend} disabled={isSending || !to.trim()}>
-              {isSending ? "Sending..." : "Send Email"}
-            </Button>
-          </div>
-        </div>
+        {groupMode && <div className="ni-group-create"><small>{participantIds.length} people selected · choose at least 2</small><Button disabled={group.isPending || !groupName.trim() || participantIds.length < 2} onClick={() => group.mutate()}>{group.isPending ? 'Creating…' : 'Create group'}</Button></div>}
       </DialogContent>
     </Dialog>
   );

@@ -33,7 +33,7 @@ import { asArray } from "@/lib/utils";
 import { DatePickerPopover } from "@/components/date-picker-popover";
 import { TimePickerPopover } from "@/components/time-picker-popover";
 
-const DEFAULT_LOCATION = "Fade Masters Barbershop";
+const DEFAULT_LOCATION = "";
 
 const COLOR_SWATCHES = [
   "#2563eb",
@@ -54,19 +54,7 @@ const DURATION_OPTIONS = [
   { label: "120 min", value: 120 },
 ];
 
-const REPEAT_OPTIONS = [
-  { label: "Does not repeat", value: "none" },
-  { label: "Daily", value: "daily" },
-  { label: "Weekly", value: "weekly" },
-  { label: "Monthly", value: "monthly" },
-];
 
-const LOCATION_OPTIONS = [
-  "Fade Masters Barbershop",
-  "Downtown Salon",
-  "Mobile Visit",
-  "Customer Location",
-];
 
 const toDateValue = (date: Date) => {
   const year = date.getFullYear();
@@ -176,7 +164,7 @@ export function CreateAppointmentDialog({
   const [endTime, setEndTime] = useState(toTimeValue(oneHourLater));
   const [duration, setDuration] = useState(60);
   const [allDay, setAllDay] = useState(false);
-  const [repeat, setRepeat] = useState("none");
+
   const [location, setLocation] = useState(DEFAULT_LOCATION);
   const [notes, setNotes] = useState("");
   const [color, setColor] = useState(COLOR_SWATCHES[0]);
@@ -238,7 +226,7 @@ export function CreateAppointmentDialog({
     setEndTime(toTimeValue(later));
     setDuration(60);
     setAllDay(false);
-    setRepeat("none");
+
     setLocation(DEFAULT_LOCATION);
     setNotes("");
     setColor(COLOR_SWATCHES[0]);
@@ -637,24 +625,6 @@ export function CreateAppointmentDialog({
               </div>
             </div>
 
-            {/* Repeat */}
-            <div className="space-y-2">
-              <label className="text-xs font-medium text-gray-300">
-                Repeat <span className="text-gray-500">(Optional)</span>
-              </label>
-              <Select value={repeat} onValueChange={setRepeat}>
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {REPEAT_OPTIONS.map((option) => (
-                    <SelectItem key={option.value} value={option.value}>
-                      {option.label}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
           </div>
 
           {/* RIGHT COLUMN */}
@@ -703,18 +673,7 @@ export function CreateAppointmentDialog({
             {/* Location */}
             <div className="space-y-2">
               <label className="text-xs font-medium text-gray-300">Location</label>
-              <Select value={location} onValueChange={setLocation}>
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {LOCATION_OPTIONS.map((option) => (
-                    <SelectItem key={option} value={option}>
-                      {option}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              <Input value={location} onChange={event => setLocation(event.target.value)} maxLength={160} placeholder="Enter appointment location (optional)" />
             </div>
 
             {/* Notes */}

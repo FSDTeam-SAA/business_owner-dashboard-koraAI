@@ -91,7 +91,7 @@ export const inboxApi = {
   search: (q: string) => api.get("/inbox/search", { params: { q } }),
   createGroup: (data: object) => api.post("/inbox/group", data),
   markRead: (chatId: string) => api.patch(`/inbox/${chatId}/read`),
-  sendMessage: (data: FormData | { recipientId: string; content?: string }) =>
+  sendMessage: (data: FormData | { recipientId?: string; conversationId?: string; content?: string }) =>
     data instanceof FormData
       ? api.post("/inbox", data, { headers: { "Content-Type": "multipart/form-data" } })
       : api.post("/inbox", data),
@@ -99,7 +99,7 @@ export const inboxApi = {
   editMessage: (conversationId: string, messageId: string, data: { content: string }) =>
     api.patch(`/inbox/${conversationId}/messages/${messageId}`, data),
   deleteChat: (id: string) => api.delete(`/inbox/${id}`),
-  getRecipients: (params?: { q?: string }) => api.get("/inbox/recipients", { params }),
+  getRecipients: (params?: { q?: string; recipientId?: string }) => api.get("/inbox/recipients", { params }),
 };
 
 export const mailApi = {

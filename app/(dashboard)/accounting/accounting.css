@@ -1,0 +1,61 @@
+.accounting-page{height:auto;min-height:100%;overflow:visible;background:var(--nv-bg);color:var(--nv-text)}
+.accounting-page .ac-content{height:auto;overflow:visible;padding:28px 30px 36px;max-width:1800px;width:100%;margin:0 auto}
+.ac-page-heading{display:flex;align-items:center;justify-content:space-between;gap:18px;margin-bottom:25px}
+.ac-page-heading>div>span{font-size:10px;letter-spacing:1.8px;color:var(--nv-muted)}
+.ac-page-heading h1{font-size:26px;letter-spacing:-.7px;font-weight:550;margin:7px 0}
+.ac-page-heading p{font-size:13px;color:var(--nv-muted);line-height:1.6}
+.ac-live-label{display:flex;align-items:center;gap:8px;font-size:11px;color:var(--nv-muted);white-space:nowrap}
+.ac-live-label i{height:6px;width:6px;border-radius:50%;background:#75bba0}
+.ac-layout{display:grid;grid-template-columns:minmax(0,1fr) 290px;gap:20px;align-items:start}
+.ac-main,.ac-aside{display:flex;flex-direction:column;gap:18px;min-width:0}
+.ac-stats{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px}
+.accounting-page .ac-stats>div,.accounting-page .ac-main>div:not(.ac-stats),.accounting-page .ac-aside>div{background:var(--nv-panel)!important;background-image:none!important;border:1px solid var(--nv-border)!important;border-radius:14px;box-shadow:none!important;color:var(--nv-text)}
+.accounting-page .ac-stats>div>div{padding:18px;min-height:134px}
+.accounting-page .ac-stats .flex.items-center.gap-3{flex-direction:column;align-items:flex-start;gap:12px;width:100%}
+.accounting-page .ac-stats .w-10{width:30px;height:30px;border:1px solid #56657a55;box-shadow:none;background:#5e718b16;color:#a0aec5;border-radius:9px}
+.accounting-page .ac-stats .w-10 svg{color:inherit}
+.accounting-page .ac-stats p:first-child{font-size:11px;white-space:normal;color:var(--nv-muted)}
+.accounting-page .ac-stats p.text-2xl{font-size:28px;font-weight:550;letter-spacing:-1px;margin-top:7px;color:var(--nv-text)}
+.accounting-page .ac-stats p:last-child{font-size:10px;color:var(--nv-muted);white-space:normal}
+.ac-panel-caption{font-size:11px!important;line-height:1.7;color:var(--nv-muted)!important;margin:7px 0 14px}
+.accounting-page h3,.accounting-page .ac-aside .text-white{font-weight:550;color:var(--nv-text)}
+.accounting-page [class*="border-[#1e2d40]"],.accounting-page [class*="border-[#173050]"]{border-color:var(--nv-border)}
+.accounting-page [class*="bg-[#0d1a2d]"]{background:var(--nv-panel)}
+.accounting-page button.bg-blue-600{background:#757ee0;color:#fff;box-shadow:inset 0 1px 0 #ffffff22}
+.accounting-page button.bg-blue-600:hover{background:#858ce8}
+.accounting-page .ac-chart-panel>div:first-child{padding-bottom:4px}
+.accounting-page .ac-chart-panel>div:last-child{padding:0 18px 16px}
+.accounting-page .recharts-wrapper{max-width:100%}
+.accounting-page .ac-aside>div:first-child>div{padding:20px}
+.accounting-page .ac-aside>div:last-child{flex:none}
+.accounting-page .ac-aside .min-h-\[62px\]{margin-top:16px;background:var(--nv-raised);border-color:var(--nv-border)}
+.accounting-page .ac-aside .grid-cols-3{grid-template-columns:1fr}
+.accounting-page .ac-aside .grid-cols-3>button{flex-direction:row;justify-content:flex-start;min-height:44px;padding:12px;gap:13px;background:var(--nv-raised);border-color:var(--nv-border);font-size:12px}
+.accounting-page .ac-aside .grid-cols-3>button svg{width:16px;height:16px;color:#9da8d6}
+.accounting-page .ac-invoices>div:first-child{padding:21px}
+.accounting-page .ac-invoices>div:first-child .items-center.justify-between{flex-wrap:wrap}
+.accounting-page .ac-invoices>div:first-child .items-center.gap-2{flex-wrap:wrap;max-width:100%}
+.accounting-page .ac-search input{background:var(--nv-raised);border-color:var(--nv-border);max-width:100%;color:var(--nv-text);width:240px}
+.accounting-page .ac-invoices table{min-width:760px}
+.accounting-page .ac-invoices th{font-size:10px;letter-spacing:.5px;text-transform:uppercase;padding:14px 20px;background:var(--nv-raised);color:var(--nv-muted)}
+.accounting-page .ac-invoices td{padding:17px 20px}
+.accounting-page .ac-invoices td:first-child p:first-child{color:#a7afe6}
+.accounting-page .ac-invoices td:first-child p:last-child{margin-top:5px;max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.accounting-page .ac-invoices tbody tr:last-child{border-bottom:0}
+.accounting-page .ac-invoices [title="Record payment"]{color:#92b6a5}
+.accounting-page .ac-invoices>div:last-child>div:last-child{gap:10px;flex-wrap:wrap}
+.accounting-page .text-gray-400,.accounting-page .text-gray-500{color:var(--nv-muted)}
+.accounting-page .text-gray-100,.accounting-page .text-gray-200,.accounting-page .text-white{color:var(--nv-text)}
+.accounting-page :is(button,a):focus-visible{outline:2px solid #9da8e8;outline-offset:3px}
+.ac-error,.ac-empty{padding:24px;color:var(--nv-muted);font-size:13px;line-height:1.7}
+.ac-error button,.ac-empty button{margin-left:12px;text-decoration:underline}
+.ac-dialog{background:#0b1016!important;border-color:#2a303a!important;color:#e7e9ef!important;border-radius:16px!important;padding:26px!important}
+.ac-dialog h2{font-size:20px;letter-spacing:-.4px}.ac-dialog label{font-size:12px!important;color:#a2a9b6!important}
+.ac-dialog input{min-height:42px;background:#111821;border-color:#303844;color:#e5e8ef}
+.ac-dialog button.bg-blue-600{background:#757ee0;min-height:42px}.ac-dialog>div.space-y-3{margin-top:8px}
+html[data-dashboard-theme="light"] .ac-dialog{background:#fff!important;color:#17202e!important;border-color:#d6dde6!important}
+html[data-dashboard-theme="light"] .ac-dialog input{background:#f8fafc;color:#17202e;border-color:#cbd5e1}
+@media(min-width:1700px){.accounting-page .ac-content{padding:34px 38px}.ac-layout{grid-template-columns:minmax(0,1fr) 310px;gap:24px}.ac-stats{gap:16px}}
+@media(max-width:1250px){.ac-stats{grid-template-columns:repeat(2,minmax(0,1fr))}.ac-layout{grid-template-columns:minmax(0,1fr) 260px}.accounting-page .ac-stats .flex.items-center.gap-3{flex-direction:row;align-items:center}.accounting-page .ac-stats>div>div{min-height:112px}}
+@media(max-width:900px){.ac-layout{grid-template-columns:1fr}.ac-aside{display:grid;grid-template-columns:repeat(2,minmax(0,1fr))}.ac-aside>div:last-child{grid-column:1/-1}.accounting-page .ac-aside .grid-cols-3{grid-template-columns:repeat(3,minmax(0,1fr))}.accounting-page .ac-content{padding:23px 20px}}
+@media(max-width:560px){.accounting-page .ac-content{padding:20px 14px}.ac-page-heading{align-items:flex-start}.ac-page-heading h1{font-size:23px}.ac-page-heading p{font-size:12px}.ac-live-label{display:none}.ac-stats{gap:9px}.accounting-page .ac-stats>div>div{padding:14px;min-height:145px}.accounting-page .ac-stats .flex.items-center.gap-3{flex-direction:column;align-items:flex-start}.accounting-page .ac-stats p.text-2xl{font-size:25px}.ac-aside{display:flex}.accounting-page .ac-invoices>div:first-child{padding:16px}.accounting-page .ac-invoices>div:first-child .items-center.gap-2{width:100%}.accounting-page .ac-search{flex:1;min-width:130px}.accounting-page .ac-search input{width:100%}.ac-page-heading{margin-bottom:20px}.accounting-page .nv-header-action{max-width:none}.accounting-page .nv-header-action>div>button{display:none}.accounting-page .ac-invoices td{padding:15px}.accounting-page .ac-aside .grid-cols-3>button{flex-direction:column;font-size:10px;text-align:center;justify-content:center}}
